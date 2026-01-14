@@ -2,8 +2,34 @@
  * Main application logic for SQL Configuration Generator
  */
 
-// Shared configurations storage - using a simple approach
-// No tokens needed! Uses a public JSON file that can be updated
+// Firebase configuration (using Realtime Database - free tier)
+// Replace these values with your Firebase project config
+const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com/",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+};
+
+// Initialize Firebase (only if not already initialized)
+let firebaseDb = null;
+if (typeof firebase !== 'undefined') {
+    try {
+        // Check if Firebase is already initialized
+        if (!firebase.apps || firebase.apps.length === 0) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        firebaseDb = firebase.database();
+    } catch (e) {
+        console.log('Firebase initialization error:', e);
+        // Firebase not configured yet - will fallback to GitHub
+    }
+}
+
+// Fallback URL for shared configs (if Firebase not configured)
 const SHARED_CONFIGS_URL = 'https://raw.githubusercontent.com/sagikrief-glitch/sqlgenerator/master/shared-configs.json';
 
 // Application state
