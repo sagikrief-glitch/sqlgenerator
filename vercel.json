@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/share-config.js": {
+      "maxDuration": 10
+    }
+  }
+}

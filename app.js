@@ -2434,13 +2434,17 @@ async function addToShared(actionId) {
             sharedConfigs.push(actionToAdd);
         }
         
-        // Save using Netlify serverless function (no token needed on client!)
+        // Save using serverless function (no token needed on client!)
         // The function handles GitHub API calls server-side
-        const netlifyUrl = 'https://your-site.netlify.app/.netlify/functions/share-config';
+        // Try Vercel function first, then Netlify, then fallback
+        const vercelUrl = window.location.origin + '/api/share-config';
+        const netlifyUrl = window.location.origin + '/.netlify/functions/share-config';
         
-        // Try Netlify function first, fallback to direct GitHub if not available
+        let saved = false;
+        
+        // Try Vercel function
         try {
-            const saveResponse = await fetch(netlifyUrl, {
+            const saveResponse = await fetch(vercelUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -2449,34 +2453,54 @@ async function addToShared(actionId) {
             });
             
             if (saveResponse.ok) {
-                alert(`✅ Configuration "${action.title}" has been shared with the team!`);
-                // Wait a moment for GitHub to update, then reload
-                setTimeout(async () => {
-                    await loadActions();
-                    renderActionsList();
-                }, 1000);
-            } else {
-                throw new Error('Failed to save via serverless function');
+                const result = await saveResponse.json();
+                if (result.success) {
+                    saved = true;
+                    alert(`✅ Configuration "${action.title}" has been shared with the team!`);
+                    // Wait a moment for GitHub to update, then reload
+                    setTimeout(async () => {
+                        await loadActions();
+                        renderActionsList();
+                    }, 1500);
+                }
             }
-        } catch (netlifyError) {
-            // Fallback: Show instructions for manual update
-            const jsonStr = JSON.stringify(sharedConfigs, null, 2);
-            const blob = new Blob([jsonStr], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'shared-configs.json';
-            a.click();
-            URL.revokeObjectURL(url);
-            
+        } catch (vercelError) {
+            console.log('Vercel function not available, trying Netlify...');
+        }
+        
+        // Try Netlify function if Vercel didn't work
+        if (!saved) {
+            try {
+                const saveResponse = await fetch(netlifyUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ configs: sharedConfigs })
+                });
+                
+                if (saveResponse.ok) {
+                    saved = true;
+                    alert(`✅ Configuration "${action.title}" has been shared with the team!`);
+                    setTimeout(async () => {
+                        await loadActions();
+                        renderActionsList();
+                    }, 1500);
+                }
+            } catch (netlifyError) {
+                console.log('Netlify function not available');
+            }
+        }
+        
+        // If both failed, show error
+        if (!saved) {
             alert(
-                `📋 Configuration "${action.title}" is ready to share!\n\n` +
-                `A file has been downloaded. To share it:\n` +
-                `1. Go to: https://github.com/sagikrief-glitch/sqlgenerator\n` +
-                `2. Edit shared-configs.json\n` +
-                `3. Replace contents with the downloaded file\n` +
-                `4. Commit changes\n\n` +
-                `Or set up Netlify function for automatic sharing (see README)`
+                `❌ Automatic sharing is not set up yet.\n\n` +
+                `Please deploy the serverless function:\n` +
+                `1. Deploy to Vercel or Netlify\n` +
+                `2. Add GITHUB_TOKEN environment variable\n` +
+                `3. See README_SHARING.md for details\n\n` +
+                `For now, the configuration is saved locally.`
             );
         }
     } catch (error) {
