@@ -161,6 +161,7 @@ function renderActionsList() {
                     ` : ''}
                     ${isShared ? `
                         <button class="btn-clone" onclick="event.stopPropagation(); addToLocal('${action.id}')" title="Add to my local configs">Add to Local</button>
+                        <button class="btn-delete" onclick="event.stopPropagation(); removeFromShared('${action.id}')" title="Remove from shared">Remove</button>
                     ` : `
                     <button class="btn-clone" onclick="event.stopPropagation(); cloneAction('${action.id}')">Clone</button>
                         <button class="btn-clone" onclick="event.stopPropagation(); addToShared('${action.id}')" style="background: #4CAF50;" title="Share with team">Share</button>
@@ -2549,6 +2550,57 @@ function addToLocal(actionId) {
     alert(`"${sharedAction.title}" has been added to your local configurations. You can now edit it.`);
 }
 
+/**
+ * Remove action from shared configurations
+ */
+async function removeFromShared(actionId) {
+    const action = allActions.find(a => a.id === actionId && a.isShared);
+    if (!action) return;
+    
+    if (!confirm(`Are you sure you want to remove "${action.title}" from shared configurations?`)) {
+        return;
+    }
+    
+    try {
+        // Get current shared configs
+        let sharedConfigs = [];
+        
+        if (firebaseDb) {
+            const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
+            const sharedData = snapshot.val();
+            if (sharedData) {
+                if (Array.isArray(sharedData)) {
+                    sharedConfigs = sharedData;
+                } else if (typeof sharedData === 'object') {
+                    sharedConfigs = Object.values(sharedData);
+                }
+            }
+        } else {
+            const response = await fetch(SHARED_CONFIGS_URL);
+            if (response.ok) {
+                sharedConfigs = await response.json();
+            }
+        }
+        
+        // Remove the action
+        sharedConfigs = sharedConfigs.filter(a => a.id !== actionId);
+        
+        // Save to Firebase
+        if (firebaseDb) {
+            await firebaseDb.ref('sharedConfigs').set(sharedConfigs);
+            alert(`✅ "${action.title}" has been removed from shared configurations.`);
+            // Reload actions
+            await loadActions();
+            renderActionsList();
+        } else {
+            alert('Firebase not configured. Cannot remove from shared.');
+        }
+    } catch (error) {
+        alert('❌ Error removing configuration: ' + error.message);
+        console.error('Error removing from Firebase:', error);
+    }
+}
+
 // Make functions available globally for onclick handlers
 window.editAction = editAction;
 window.deleteAction = deleteAction;
@@ -2557,3 +2609,4 @@ window.removeMultiRowFromUI = removeMultiRowFromUI;
 window.removeModalMultiRowFromUI = removeModalMultiRowFromUI;
 window.addToShared = addToShared;
 window.addToLocal = addToLocal;
+window.removeFromShared = removeFromShared;
