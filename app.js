@@ -570,8 +570,9 @@ function parseStoreNos(input) {
 
 /**
  * Parse JSON_SET arguments string
- * Example: "'$.path1', 'value1', '$.path2', 123"
+ * Example: "'$.path1', 'value1', '$.path2', 123, '$.path3', JSON_OBJECT(...)"
  * Returns array of {path, type, value} objects
+ * Handles JSON_OBJECT expressions as nested values
  */
 function parseJSONSetArguments(argsStr) {
     const results = [];
@@ -579,40 +580,86 @@ function parseJSONSetArguments(argsStr) {
     let currentToken = '';
     let tokens = [];
     let quoteChar = null;
+    let parenDepth = 0;
+    let inJsonObject = false;
     
-    // Simple tokenizer that handles quoted strings and values
+    // Enhanced tokenizer that handles quoted strings, nested JSON_OBJECT, and parentheses
     for (let i = 0; i < argsStr.length; i++) {
         const char = argsStr[i];
         const prevChar = i > 0 ? argsStr[i - 1] : '';
+        const nextChars = argsStr.substring(i, Math.min(i + 12, argsStr.length)).toUpperCase();
+        
+        // Check if we're starting a JSON_OBJECT (not inside a string)
+        if (!inString && !inJsonObject && nextChars.startsWith('JSON_OBJECT')) {
+            // If we have accumulated a token before this, push it
+            if (currentToken.trim()) {
+                tokens.push(currentToken.trim());
+                currentToken = '';
+            }
+            inJsonObject = true;
+            parenDepth = 0;
+            currentToken += char;
+            continue;
+        }
         
         if ((char === "'" || char === '"') && prevChar !== '\\') {
             if (!inString) {
                 inString = true;
                 quoteChar = char;
-                if (currentToken.trim()) {
+                // Don't push token if we're inside JSON_OBJECT
+                if (currentToken.trim() && !inJsonObject) {
                     tokens.push(currentToken.trim());
                     currentToken = '';
                 }
             } else if (char === quoteChar) {
                 inString = false;
-                tokens.push(currentToken);
-                currentToken = '';
+                // Don't push token if we're inside JSON_OBJECT
+                if (!inJsonObject) {
+                    tokens.push(currentToken);
+                    currentToken = '';
+                }
                 quoteChar = null;
+            }
+            // Always add the quote character to currentToken
+            currentToken += char;
+        } else if (!inString) {
+            // Track parentheses for JSON_OBJECT
+            if (char === '(') {
+                if (inJsonObject) {
+                    parenDepth++;
+                }
+                currentToken += char;
+            } else if (char === ')') {
+                if (inJsonObject) {
+                    parenDepth--;
+                    currentToken += char;
+                    // If we've closed all parentheses and we're in JSON_OBJECT, it's complete
+                    if (parenDepth === 0) {
+                        tokens.push(currentToken.trim());
+                        currentToken = '';
+                        inJsonObject = false;
+                        parenDepth = 0;
+                    }
+                } else {
+                    currentToken += char;
+                }
+            } else if (char === ',' && !inJsonObject) {
+                // Only split on comma if not inside JSON_OBJECT
+                if (currentToken.trim()) {
+                    tokens.push(currentToken.trim());
+                    currentToken = '';
+                }
+            } else if (/\s/.test(char) && !inJsonObject) {
+                // Skip whitespace outside strings and JSON_OBJECT
+                if (currentToken.trim()) {
+                    tokens.push(currentToken.trim());
+                    currentToken = '';
+                }
             } else {
                 currentToken += char;
             }
-        } else if (!inString && char === ',') {
-            if (currentToken.trim()) {
-                tokens.push(currentToken.trim());
-                currentToken = '';
-            }
-        } else if (!inString && /\s/.test(char)) {
-            // Skip whitespace outside strings
-            if (currentToken.trim()) {
-                tokens.push(currentToken.trim());
-                currentToken = '';
-            }
         } else {
+            // Inside a string - just accumulate
             currentToken += char;
         }
     }
@@ -630,9 +677,20 @@ function parseJSONSetArguments(argsStr) {
         // Remove quotes from path
         pathToken = pathToken.replace(/^['"]|['"]$/g, '').replace(/''/g, "'");
         
+        // Check if value is JSON_OBJECT
+        const valueUpper = valueToken.toUpperCase().trim();
+        if (valueUpper.startsWith('JSON_OBJECT')) {
+            // Store JSON_OBJECT as raw SQL expression
+            results.push({
+                path: pathToken,
+                type: 'json_object',
+                value: valueToken.trim() // Store the entire JSON_OBJECT expression
+            });
+            continue;
+        }
+        
         // Determine value type and parse
         let value, type;
-        const valueUpper = valueToken.toUpperCase().trim();
         if (valueUpper === 'NULL') {
             type = 'null';
             value = null;
@@ -1130,6 +1188,9 @@ function formatSqlValue(type, rawValue) {
     } else if (type === 'number') {
         const num = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue);
         return isNaN(num) ? '0' : String(num);
+    } else if (type === 'json_object') {
+        // JSON_OBJECT expression - output as-is without quotes
+        return String(rawValue);
     } else {
         // String: escape single quotes
         return "'" + escapeSqlString(rawValue) + "'";
@@ -1350,6 +1411,9 @@ function renderMultiRows() {
                 row.value = e.target.value === 'true';
             } else if (row.type === 'number') {
                 row.value = parseFloat(e.target.value) || 0;
+            } else if (row.type === 'json_object') {
+                // Preserve JSON_OBJECT expressions as-is
+                row.value = e.target.value;
             } else {
                 row.value = e.target.value;
             }
@@ -1389,6 +1453,10 @@ function getValueInputHtml(type, value, index) {
     } else if (type === 'number') {
         const numValue = typeof value === 'number' ? value : (parseFloat(value) || 0);
         return `<input type="number" class="row-value" value="${numValue}" required style="width: 100%;">`;
+    } else if (type === 'json_object') {
+        // JSON_OBJECT expressions displayed in a textarea for better editing
+        const jsonValue = value !== undefined && value !== null ? String(value) : '';
+        return `<textarea class="row-value" required style="width: 100%; min-height: 80px; font-family: 'Courier New', monospace; font-size: 12px; resize: vertical;">${escapeHtml(jsonValue)}</textarea>`;
     } else {
         return `<input type="text" class="row-value" value="${escapeHtml(String(value))}" required style="width: 100%;">`;
     }
@@ -1576,13 +1644,24 @@ function renderModalMultiRows() {
     container.querySelectorAll('.modal-row-value-type').forEach((select, index) => {
         select.addEventListener('change', (e) => {
             const row = modalMultiRows[index];
+            const oldType = row.type;
             row.type = e.target.value;
+            // Preserve JSON_OBJECT value when type changes (shouldn't happen in practice, but safety check)
+            if (oldType === 'json_object' && row.type !== 'json_object') {
+                // If changing away from json_object, clear the value
+                row.value = '';
+            }
             if (row.type === 'null') {
                 row.value = null;
             } else if (row.type === 'boolean') {
                 row.value = false;
             } else if (row.type === 'number') {
                 row.value = 0;
+            } else if (row.type === 'json_object') {
+                // Preserve existing JSON_OBJECT value if present, otherwise set empty
+                if (oldType !== 'json_object') {
+                    row.value = '';
+                }
             } else {
                 row.value = '';
             }
@@ -1598,6 +1677,9 @@ function renderModalMultiRows() {
                 row.value = e.target.value === 'true';
             } else if (row.type === 'number') {
                 row.value = parseFloat(e.target.value) || 0;
+            } else if (row.type === 'json_object') {
+                // Preserve JSON_OBJECT expressions as-is
+                row.value = e.target.value;
             } else {
                 row.value = e.target.value;
             }
@@ -1636,6 +1718,10 @@ function getModalValueInputHtml(type, value, index) {
         `;
     } else if (type === 'number') {
         return `<input type="number" class="modal-row-value" value="${value !== undefined && value !== null ? value : ''}" required style="width: 100%;">`;
+    } else if (type === 'json_object') {
+        // JSON_OBJECT expressions displayed in a textarea for better editing
+        const jsonValue = value !== undefined && value !== null ? String(value) : '';
+        return `<textarea class="modal-row-value" required style="width: 100%; min-height: 80px; font-family: 'Courier New', monospace; font-size: 12px; resize: vertical;">${escapeHtml(jsonValue)}</textarea>`;
     } else {
         return `<input type="text" class="modal-row-value" value="${escapeHtml(value !== undefined && value !== null ? String(value) : '')}" required style="width: 100%;">`;
     }
@@ -1788,6 +1874,7 @@ function setupEventListeners() {
     
     // Format toggle
     document.getElementById('formatSqlToggle').addEventListener('change', updateSQLFormatting);
+    
     
     // Action Modal close
     document.getElementById('closeModal').addEventListener('click', closeActionModal);

@@ -25,6 +25,19 @@ header {
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.header-title-section {
+    flex: 1;
+    min-width: 200px;
+}
+
 header h1 {
     font-size: 24px;
     margin-bottom: 5px;
@@ -63,24 +76,13 @@ header h1 {
 .header-buttons {
     display: flex;
     gap: 10px;
-    margin-bottom: 15px;
-}
-
-.header-buttons-column {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    flex: 1;
+    flex-wrap: wrap;
+    align-items: center;
 }
 
 .header-buttons .btn {
-    padding: 8px 16px;
-    font-size: 13px;
-    flex: 1;
-}
-
-.header-buttons-column .btn {
-    flex: 1;
+    white-space: nowrap;
+    min-width: auto;
 }
 
 .search-box {
@@ -387,6 +389,8 @@ header h1 {
     justify-content: center;
     align-items: center;
     z-index: 2000;
+    padding: 20px;
+    box-sizing: border-box;
 }
 
 .modal-content {
@@ -397,6 +401,8 @@ header h1 {
     max-height: 90vh;
     overflow-y: auto;
     box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    margin: auto;
+    position: relative;
 }
 
 .modal-header {
