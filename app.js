@@ -63,7 +63,8 @@ async function loadActions() {
  * Save custom actions to localStorage
  */
 function saveCustomActions() {
-    const customActions = allActions.filter(action => !action.isBuiltIn);
+    // Only save local actions (not shared or built-in)
+    const customActions = allActions.filter(action => !action.isBuiltIn && !action.isShared);
     localStorage.setItem('customActions', JSON.stringify(customActions));
 }
 
@@ -89,18 +90,27 @@ function renderActionsList() {
     
     actionsList.innerHTML = filteredActions.map(action => {
         const isActive = selectedAction && selectedAction.id === action.id;
-        const canEdit = !action.isBuiltIn;
+        const canEdit = !action.isBuiltIn && !action.isShared;
+        const isShared = action.isShared === true;
         
         return `
             <div class="action-card ${isActive ? 'active' : ''}" data-action-id="${action.id}">
-                <div class="action-card-title">${escapeHtml(action.title)}</div>
+                <div class="action-card-title">
+                    ${escapeHtml(action.title)}
+                    ${isShared ? '<span style="background: #4CAF50; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 8px;">SHARED</span>' : ''}
+                </div>
                 ${action.description ? `<div class="action-card-description">${escapeHtml(action.description)}</div>` : ''}
                 <div class="action-card-actions">
                     ${canEdit ? `
                         <button class="btn-edit" onclick="event.stopPropagation(); editAction('${action.id}')">Edit</button>
                         <button class="btn-delete" onclick="event.stopPropagation(); deleteAction('${action.id}')">Delete</button>
                     ` : ''}
-                    <button class="btn-clone" onclick="event.stopPropagation(); cloneAction('${action.id}')">Clone</button>
+                    ${isShared ? `
+                        <button class="btn-clone" onclick="event.stopPropagation(); addToLocal('${action.id}')" title="Add to my local configs">Add to Local</button>
+                    ` : `
+                        <button class="btn-clone" onclick="event.stopPropagation(); cloneAction('${action.id}')">Clone</button>
+                        <button class="btn-clone" onclick="event.stopPropagation(); addToShared('${action.id}')" style="background: #4CAF50;" title="Share with team">Share</button>
+                    `}
                 </div>
             </div>
         `;
