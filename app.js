@@ -12,26 +12,51 @@ let isModalMultiMode = false;
 let modalMultiRows = [];
 
 // Initialize application
-document.addEventListener('DOMContentLoaded', () => {
-    loadActions();
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadActions();
     renderActionsList();
     setupEventListeners();
     loadLastUsedValues();
 });
 
 /**
- * Load actions from built-in and localStorage
+ * Load actions from built-in, shared configs, and localStorage
  */
-function loadActions() {
+async function loadActions() {
     // Load built-in actions
     const builtInActions = ACTIONS.map(action => ({ ...action, isBuiltIn: true }));
+    
+    // Load shared actions from GitHub
+    let sharedActions = [];
+    try {
+        const sharedConfigsUrl = 'https://raw.githubusercontent.com/sagikrief-glitch/sqlgenerator/master/shared-configs.json';
+        const response = await fetch(sharedConfigsUrl);
+        if (response.ok) {
+            sharedActions = await response.json();
+            // Mark as shared
+            sharedActions = sharedActions.map(action => ({ ...action, isShared: true, isBuiltIn: false }));
+        }
+    } catch (error) {
+        console.log('Could not load shared configurations:', error);
+    }
     
     // Load custom actions from localStorage
     const customActionsJson = localStorage.getItem('customActions');
     const customActions = customActionsJson ? JSON.parse(customActionsJson) : [];
     
-    // Merge and set all actions
-    allActions = [...builtInActions, ...customActions];
+    // Merge: built-in → shared → local (local can override shared with same ID)
+    const allSharedAndLocal = [...sharedActions, ...customActions];
+    // Remove duplicates (local takes precedence)
+    const uniqueActions = [];
+    const seenIds = new Set();
+    allSharedAndLocal.forEach(action => {
+        if (!seenIds.has(action.id)) {
+            seenIds.add(action.id);
+            uniqueActions.push(action);
+        }
+    });
+    
+    allActions = [...builtInActions, ...uniqueActions];
 }
 
 /**
@@ -2361,8 +2386,111 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/**
+ * Add action to shared configurations (requires GitHub token)
+ */
+async function addToShared(actionId) {
+    const action = allActions.find(a => a.id === actionId);
+    if (!action || action.isBuiltIn || action.isShared) return;
+    
+    // Check if GitHub token is set
+    let githubToken = localStorage.getItem('githubToken');
+    if (!githubToken) {
+        githubToken = prompt('Enter your GitHub Personal Access Token to share configurations:\n\n' +
+            'To create a token:\n' +
+            '1. Go to https://github.com/settings/tokens\n' +
+            '2. Click "Generate new token (classic)"\n' +
+            '3. Give it "repo" permissions\n' +
+            '4. Copy and paste the token here\n\n' +
+            'This token will be stored in your browser for future use.');
+        
+        if (!githubToken) return;
+        localStorage.setItem('githubToken', githubToken);
+    }
+    
+    try {
+        // Get current shared configs
+        const sharedConfigsUrl = 'https://raw.githubusercontent.com/sagikrief-glitch/sqlgenerator/master/shared-configs.json';
+        const response = await fetch(sharedConfigsUrl);
+        let sharedConfigs = [];
+        if (response.ok) {
+            sharedConfigs = await response.json();
+        }
+        
+        // Check if action already exists in shared
+        const existingIndex = sharedConfigs.findIndex(a => a.id === actionId);
+        const actionToAdd = { ...action };
+        delete actionToAdd.isShared; // Remove local flag
+        
+        if (existingIndex >= 0) {
+            sharedConfigs[existingIndex] = actionToAdd;
+        } else {
+            sharedConfigs.push(actionToAdd);
+        }
+        
+        // Get current file SHA for update
+        const apiUrl = 'https://api.github.com/repos/sagikrief-glitch/sqlgenerator/contents/shared-configs.json';
+        const fileResponse = await fetch(apiUrl);
+        let sha = null;
+        if (fileResponse.ok) {
+            const fileData = await fileResponse.json();
+            sha = fileData.sha;
+        }
+        
+        // Commit to GitHub
+        const commitResponse = await fetch(apiUrl, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `token ${githubToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                message: `Add/Update shared configuration: ${action.title}`,
+                content: btoa(JSON.stringify(sharedConfigs, null, 2)),
+                sha: sha
+            })
+        });
+        
+        if (commitResponse.ok) {
+            alert(`Configuration "${action.title}" has been shared with the team!`);
+            // Reload actions to get updated shared configs
+            await loadActions();
+            renderActionsList();
+        } else {
+            const error = await commitResponse.json();
+            throw new Error(error.message || 'Failed to save to GitHub');
+        }
+    } catch (error) {
+        alert('Error sharing configuration: ' + error.message + '\n\nMake sure your GitHub token has "repo" permissions.');
+        console.error('Error sharing to GitHub:', error);
+    }
+}
+
+/**
+ * Add shared action to local configurations
+ */
+function addToLocal(actionId) {
+    const sharedAction = allActions.find(a => a.id === actionId && a.isShared);
+    if (!sharedAction) return;
+    
+    // Create a local copy
+    const localCopy = { ...sharedAction };
+    delete localCopy.isShared;
+    localCopy.id = generateCustomActionId(); // New ID for local copy
+    
+    // Add to local actions
+    allActions.push(localCopy);
+    saveCustomActions();
+    renderActionsList();
+    
+    alert(`"${sharedAction.title}" has been added to your local configurations. You can now edit it.`);
+}
+
 // Make functions available globally for onclick handlers
 window.editAction = editAction;
 window.deleteAction = deleteAction;
 window.cloneAction = cloneAction;
 window.removeMultiRowFromUI = removeMultiRowFromUI;
+window.removeModalMultiRowFromUI = removeModalMultiRowFromUI;
+window.addToShared = addToShared;
+window.addToLocal = addToLocal;
