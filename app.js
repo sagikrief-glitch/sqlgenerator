@@ -759,7 +759,7 @@ function validateAndPreviewStoreNos() {
             countDiv.textContent = count > 0 ? `${count} store${count !== 1 ? 's' : ''} in filter` : '';
         } else {
         countDiv.textContent = count > 0 ? `${count} store${count !== 1 ? 's' : ''} will be updated` : '';
-        }
+    }
     }
 }
 
@@ -1368,7 +1368,7 @@ function renderMultiRows() {
             if (formatted !== e.target.value) {
                 e.target.value = formatted;
                 multiRows[index].path = formatted;
-            }
+    }
         });
     });
 }
@@ -2424,7 +2424,7 @@ function editAction(actionId) {
     if (action.kind === 'free_sql') {
         openFreeSqlModal(actionId);
     } else {
-        openActionModal(actionId);
+    openActionModal(actionId);
     }
 }
 
@@ -2585,8 +2585,13 @@ function setupDescriptionEdit() {
                 // Update action description
                 selectedAction.description = newDescription || undefined;
                 
-                // Save to localStorage
-                saveCustomActions();
+                // If it's a shared action, update Firebase
+                if (selectedAction.isShared) {
+                    updateSharedActionDescription(selectedAction.id, newDescription || undefined);
+                } else {
+                    // Save to localStorage
+                    saveCustomActions();
+                }
                 
                 // Update actions list
                 renderActionsList();
@@ -2724,6 +2729,48 @@ function addToLocal(actionId) {
     renderActionsList();
     
     alert(`"${sharedAction.title}" has been added to your local configurations. You can now edit it.`);
+}
+
+/**
+ * Update shared action description in Firebase
+ */
+async function updateSharedActionDescription(actionId, description) {
+    try {
+        // Get current shared configs
+        let sharedConfigs = [];
+        
+        if (firebaseDb) {
+            const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
+            const sharedData = snapshot.val();
+            if (sharedData) {
+                if (Array.isArray(sharedData)) {
+                    sharedConfigs = sharedData;
+                } else if (typeof sharedData === 'object') {
+                    sharedConfigs = Object.values(sharedData);
+                }
+            }
+            
+            // Find and update the action
+            const actionIndex = sharedConfigs.findIndex(a => a.id === actionId);
+            if (actionIndex !== -1) {
+                sharedConfigs[actionIndex].description = description;
+                
+                // Save back to Firebase
+                await firebaseDb.ref('sharedConfigs').set(sharedConfigs);
+                
+                // Update local copy
+                const localIndex = allActions.findIndex(a => a.id === actionId);
+                if (localIndex !== -1) {
+                    allActions[localIndex].description = description;
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error updating shared action description:', error);
+        alert('Error updating description in shared configs. Changes saved locally only.');
+        // Still save locally
+        saveCustomActions();
+    }
 }
 
 /**
