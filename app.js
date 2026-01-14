@@ -234,7 +234,20 @@ function renderActionForm() {
                 </button>
             ` : ''}
         </div>
-        ${action.description ? `<p style="color: #666; margin-bottom: 20px;">${escapeHtml(action.description)}</p>` : ''}
+        <div class="description-header" style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px;">
+            ${action.description ? `
+                <p id="actionDescriptionDisplay" style="color: #666; margin: 0; flex: 1;">${escapeHtml(action.description)}</p>
+            ` : `
+                <p id="actionDescriptionDisplay" style="color: #999; font-style: italic; margin: 0; flex: 1;">No description</p>
+            `}
+            ${!action.isBuiltIn ? `
+                <button class="btn-edit-title" id="editDescriptionBtn" title="Edit description" style="padding: 6px;">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M11.333 2.00001C11.5084 1.82445 11.7163 1.68506 11.9448 1.58933C12.1733 1.4936 12.4179 1.44336 12.6663 1.44336C12.9148 1.44336 13.1594 1.4936 13.3879 1.58933C13.6164 1.68506 13.8243 1.82445 13.9997 2.00001C14.1752 2.17557 14.3146 2.38345 14.4103 2.61194C14.5061 2.84043 14.5563 3.08501 14.5563 3.33345C14.5563 3.58189 14.5061 3.82647 14.4103 4.05496C14.3146 4.28345 14.1752 4.49133 13.9997 4.66689L5.33301 13.3336L1.33301 14.6669L2.66634 10.6669L11.333 2.00001Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            ` : ''}
+        </div>
         
         <form id="actionForm">
             <div class="form-group">
@@ -369,7 +382,20 @@ function renderFreeSQLForm(action) {
                 </button>
             ` : ''}
         </div>
-        ${action.description ? `<p style="color: #666; margin-bottom: 20px;">${escapeHtml(action.description)}</p>` : ''}
+        <div class="description-header" style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px;">
+            ${action.description ? `
+                <p id="actionDescriptionDisplay" style="color: #666; margin: 0; flex: 1;">${escapeHtml(action.description)}</p>
+            ` : `
+                <p id="actionDescriptionDisplay" style="color: #999; font-style: italic; margin: 0; flex: 1;">No description</p>
+            `}
+            ${!action.isBuiltIn ? `
+                <button class="btn-edit-title" id="editDescriptionBtn" title="Edit description" style="padding: 6px;">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M11.333 2.00001C11.5084 1.82445 11.7163 1.68506 11.9448 1.58933C12.1733 1.4936 12.4179 1.44336 12.6663 1.44336C12.9148 1.44336 13.1594 1.4936 13.3879 1.58933C13.6164 1.68506 13.8243 1.82445 13.9997 2.00001C14.1752 2.17557 14.3146 2.38345 14.4103 2.61194C14.5061 2.84043 14.5563 3.08501 14.5563 3.33345C14.5563 3.58189 14.5061 3.82647 14.4103 4.05496C14.3146 4.28345 14.1752 4.49133 13.9997 4.66689L5.33301 13.3336L1.33301 14.6669L2.66634 10.6669L11.333 2.00001Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            ` : ''}
+        </div>
         
         <form id="actionForm">
             <div class="form-group">
@@ -444,6 +470,9 @@ function renderFreeSQLForm(action) {
     
     // Add title edit functionality
     setupTitleEdit();
+    
+    // Add description edit functionality
+    setupDescriptionEdit();
     
     // Initial validation
     validateAndPreviewStoreNos();
@@ -2521,6 +2550,75 @@ function setupTitleEdit() {
 }
 
 /**
+ * Setup inline description editing
+ */
+function setupDescriptionEdit() {
+    const editBtn = document.getElementById('editDescriptionBtn');
+    const descriptionDisplay = document.getElementById('actionDescriptionDisplay');
+    
+    if (!editBtn || !descriptionDisplay || !selectedAction || selectedAction.isBuiltIn) {
+        return;
+    }
+    
+    editBtn.addEventListener('click', () => {
+        const currentDescription = selectedAction.description || '';
+        
+        // Replace p with textarea
+        const descriptionInput = document.createElement('textarea');
+        descriptionInput.value = currentDescription;
+        descriptionInput.className = 'title-input';
+        descriptionInput.style.cssText = 'padding: 4px 8px; border: 2px solid #4CAF50; border-radius: 4px; width: 100%; max-width: 600px; min-height: 60px; resize: vertical; font-family: inherit; font-size: 14px;';
+        descriptionInput.placeholder = 'Enter description (optional)';
+        
+        // Replace description with textarea
+        const descriptionHeader = descriptionDisplay.parentElement;
+        descriptionDisplay.style.display = 'none';
+        editBtn.style.display = 'none';
+        descriptionHeader.appendChild(descriptionInput);
+        descriptionInput.focus();
+        descriptionInput.setSelectionRange(descriptionInput.value.length, descriptionInput.value.length);
+        
+        // Save on blur
+        const saveDescription = () => {
+            const newDescription = descriptionInput.value.trim();
+            if (newDescription !== currentDescription) {
+                // Update action description
+                selectedAction.description = newDescription || undefined;
+                
+                // Save to localStorage
+                saveCustomActions();
+                
+                // Update actions list
+                renderActionsList();
+                
+                // Re-render form to show updated description
+                renderActionForm();
+            } else {
+                // No change, just restore
+                descriptionInput.remove();
+                descriptionDisplay.style.display = '';
+                editBtn.style.display = '';
+            }
+        };
+        
+        const cancelEdit = () => {
+            descriptionInput.remove();
+            descriptionDisplay.style.display = '';
+            editBtn.style.display = '';
+        };
+        
+        descriptionInput.addEventListener('blur', saveDescription);
+        descriptionInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelEdit();
+            }
+            // Allow Enter for multi-line descriptions
+        });
+    });
+}
+
+/**
  * Escape HTML to prevent XSS
  */
 function escapeHtml(text) {
@@ -2793,7 +2891,20 @@ function renderScriptGroupForm(action) {
                 </button>
             ` : ''}
         </div>
-        ${action.description ? `<p style="color: #666; margin-bottom: 20px;">${escapeHtml(action.description)}</p>` : ''}
+        <div class="description-header" style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px;">
+            ${action.description ? `
+                <p id="actionDescriptionDisplay" style="color: #666; margin: 0; flex: 1;">${escapeHtml(action.description)}</p>
+            ` : `
+                <p id="actionDescriptionDisplay" style="color: #999; font-style: italic; margin: 0; flex: 1;">No description</p>
+            `}
+            ${!action.isBuiltIn ? `
+                <button class="btn-edit-title" id="editDescriptionBtn" title="Edit description" style="padding: 6px;">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M11.333 2.00001C11.5084 1.82445 11.7163 1.68506 11.9448 1.58933C12.1733 1.4936 12.4179 1.44336 12.6663 1.44336C12.9148 1.44336 13.1594 1.4936 13.3879 1.58933C13.6164 1.68506 13.8243 1.82445 13.9997 2.00001C14.1752 2.17557 14.3146 2.38345 14.4103 2.61194C14.5061 2.84043 14.5563 3.08501 14.5563 3.33345C14.5563 3.58189 14.5061 3.82647 14.4103 4.05496C14.3146 4.28345 14.1752 4.49133 13.9997 4.66689L5.33301 13.3336L1.33301 14.6669L2.66634 10.6669L11.333 2.00001Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            ` : ''}
+        </div>
         
         <form id="actionForm">
             <div class="form-group">
@@ -2835,6 +2946,9 @@ function renderScriptGroupForm(action) {
     
     // Add title edit functionality
     setupTitleEdit();
+    
+    // Add description edit functionality
+    setupDescriptionEdit();
     
     // Initial validation
     validateAndPreviewStoreNos();
