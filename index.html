@@ -43,7 +43,10 @@ USAGE:
                     <h2>Actions</h2>
                 </div>
                 <div class="header-buttons">
-                    <button id="freeSqlBtn" class="btn btn-primary">Free SQL</button>
+                    <div class="header-buttons-column">
+                        <button id="freeSqlBtn" class="btn btn-primary">Free SQL</button>
+                        <button id="createScriptGroupBtn" class="btn btn-primary">Create Script Group</button>
+                    </div>
                     <button id="importSqlBtn" class="btn btn-primary">Import from SQL</button>
                     <button id="addActionBtn" class="btn btn-primary">Create JSON_SET</button>
                 </div>
@@ -256,6 +259,130 @@ USAGE:
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" id="cancelModalBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for Create/Edit Script Group -->
+    <div id="scriptGroupModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="scriptGroupModalTitle">Create Script Group</h2>
+                <button class="modal-close" id="closeScriptGroupModal">&times;</button>
+            </div>
+            <form id="scriptGroupForm" class="modal-form">
+                <div class="form-group">
+                    <label for="scriptGroupTitleInput">Group Title *</label>
+                    <input type="text" id="scriptGroupTitleInput" required>
+                </div>
+                <div class="form-group">
+                    <label for="scriptGroupDescription">Description</label>
+                    <textarea id="scriptGroupDescription" rows="2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Scripts</label>
+                    <div id="scriptGroupScriptsList" class="script-group-scripts-list"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelScriptGroupModalBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for Edit Script in Group -->
+    <div id="scriptEditorModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="scriptEditorModalTitle">Edit Script</h2>
+                <button class="modal-close" id="closeScriptEditorModal">&times;</button>
+            </div>
+            <form id="scriptEditorForm" class="modal-form">
+                <div id="scriptEditorRawSqlContainer" style="display: none;">
+                    <div class="form-group">
+                        <label for="scriptEditorTitleInput">Script Title *</label>
+                        <input type="text" id="scriptEditorTitleInput" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="scriptEditorDescription">Description</label>
+                        <textarea id="scriptEditorDescription" rows="2" placeholder="Optional description for this script"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="scriptEditorSqlBlock">SQL Block *</label>
+                        <textarea id="scriptEditorSqlBlock" rows="10" style="font-family: 'Courier New', monospace;" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="scriptEditorEnsureSemicolon" checked>
+                            Ensure trailing semicolon
+                        </label>
+                    </div>
+                </div>
+                <div id="scriptEditorJsonSetContainer" style="display: none;">
+                    <div class="form-group">
+                        <label for="scriptEditorJsonSetTitleInput">Script Title *</label>
+                        <input type="text" id="scriptEditorJsonSetTitleInput" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="scriptEditorJsonSetDescription">Description</label>
+                        <textarea id="scriptEditorJsonSetDescription" rows="2" placeholder="Optional description for this script"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="scriptEditorJsonSetStationId">StationId Default *</label>
+                        <input type="text" id="scriptEditorJsonSetStationId" required>
+                    </div>
+                    <div id="scriptEditorJsonSetSingleContainer">
+                        <div class="form-group" style="display: flex; align-items: flex-end; gap: 10px;">
+                            <div style="flex: 1;">
+                                <label for="scriptEditorJsonSetJsonPath">JSON Path *</label>
+                                <input type="text" id="scriptEditorJsonSetJsonPath" placeholder="$.cancelOrder" required>
+                            </div>
+                            <div style="padding-top: 24px;">
+                                <button type="button" class="btn btn-secondary" id="scriptEditorJsonSetAddValueBtn" style="white-space: nowrap;">+ Add value</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="scriptEditorJsonSetValueType">Value Type *</label>
+                            <select id="scriptEditorJsonSetValueType" required>
+                                <option value="boolean">Boolean</option>
+                                <option value="string">String</option>
+                                <option value="number">Number</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="scriptEditorJsonSetValueGroup">
+                            <label for="scriptEditorJsonSetValue">Value *</label>
+                            <div id="scriptEditorJsonSetValueContainer"></div>
+                        </div>
+                    </div>
+                    <div id="scriptEditorJsonSetMultiContainer" style="display: none;">
+                        <div class="form-group">
+                            <label>JSON Paths and Values</label>
+                            <div id="scriptEditorJsonSetMultiRowsContainer"></div>
+                            <button type="button" class="btn btn-secondary" id="scriptEditorJsonSetAddRowBtn" style="margin-top: 10px;">+ Add value</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="scriptEditorJsonSetTableName">Table Name</label>
+                        <input type="text" id="scriptEditorJsonSetTableName" value="StoreStations">
+                    </div>
+                    <div class="form-group">
+                        <label for="scriptEditorJsonSetStationColumn">Where clause</label>
+                        <input type="text" id="scriptEditorJsonSetStationColumn" value="StationId">
+                    </div>
+                    <div class="form-group">
+                        <label for="scriptEditorJsonSetStoreColumn">AND clause</label>
+                        <input type="text" id="scriptEditorJsonSetStoreColumn" value="StoreNo">
+                    </div>
+                    <div class="form-group">
+                        <label for="scriptEditorJsonSetConfigColumn">Configuration JSON Column Name</label>
+                        <input type="text" id="scriptEditorJsonSetConfigColumn" value="Configuration">
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelScriptEditorModalBtn">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save</button>
                 </div>
             </form>

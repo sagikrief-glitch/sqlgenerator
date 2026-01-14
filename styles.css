@@ -66,9 +66,20 @@ header h1 {
     margin-bottom: 15px;
 }
 
+.header-buttons-column {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+}
+
 .header-buttons .btn {
     padding: 8px 16px;
     font-size: 13px;
+    flex: 1;
+}
+
+.header-buttons-column .btn {
     flex: 1;
 }
 
@@ -451,4 +462,114 @@ header h1 {
     .actions-panel {
         max-height: none;
     }
+}
+
+/* Script Group Styles */
+.script-group-container {
+    /* Container for script group form */
+}
+
+.script-group-scripts-list {
+    margin: 15px 0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    min-height: 100px;
+    background: #f9f9f9;
+    transition: background 0.2s;
+}
+
+.script-group-scripts-list:hover {
+    background: #f0f0f0;
+    border-color: #4CAF50;
+}
+
+.script-item {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+.script-item:last-child {
+    margin-bottom: 0;
+}
+
+.script-item-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.script-type-badge {
+    background: #2196F3;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.script-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.script-actions .btn-small {
+    padding: 4px 8px;
+    font-size: 11px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    background: #757575;
+    color: white;
+}
+
+.script-actions .btn-small:hover {
+    background: #616161;
+}
+
+.script-actions .btn-small:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+.script-actions .btn-danger {
+    background: #f44336;
+}
+
+.script-actions .btn-danger:hover {
+    background: #d32f2f;
+}
+
+.btn-small {
+    padding: 4px 8px;
+    font-size: 11px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    background: #757575;
+    color: white;
+}
+
+.btn-small:hover {
+    background: #616161;
+}
+
+.btn-small:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+.btn-danger {
+    background: #f44336;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #d32f2f;
 }

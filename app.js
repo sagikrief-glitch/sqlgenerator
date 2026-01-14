@@ -151,6 +151,7 @@ function renderActionsList() {
             <div class="action-card ${isActive ? 'active' : ''}" data-action-id="${action.id}">
                 <div class="action-card-title">
                     ${escapeHtml(action.title)}
+                    ${action.kind === 'script_group' ? '<span style="background: #2196F3; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 8px;">GROUP</span>' : ''}
                     ${isShared ? '<span style="background: #4CAF50; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 8px;">SHARED</span>' : ''}
                 </div>
                 ${action.description ? `<div class="action-card-description">${escapeHtml(action.description)}</div>` : ''}
@@ -202,6 +203,12 @@ function renderActionForm() {
     const formContainer = document.getElementById('formContainer');
     if (!selectedAction) {
         formContainer.innerHTML = '<p class="placeholder-text">Select an action to get started</p>';
+        return;
+    }
+    
+    // Handle script groups
+    if (selectedAction.kind === 'script_group') {
+        renderScriptGroupForm(selectedAction);
         return;
     }
     
@@ -874,6 +881,12 @@ function injectStoreFilter(sqlText, storeNos, storeColumn, mode, applyAllStateme
  */
 function generateSQL() {
     if (!selectedAction) return;
+    
+    // Handle script_group action type
+    if (selectedAction.kind === 'script_group') {
+        generateScriptGroupSQL();
+        return;
+    }
     
     // Handle free_sql action type
     if (selectedAction.kind === 'free_sql') {
@@ -1728,6 +1741,11 @@ function setupEventListeners() {
         openActionModal();
     });
     
+    // Create Script Group button
+    document.getElementById('createScriptGroupBtn').addEventListener('click', () => {
+        openScriptGroupModal();
+    });
+    
     // Search input
     document.getElementById('searchInput').addEventListener('input', () => {
         renderActionsList();
@@ -1797,6 +1815,51 @@ function setupEventListeners() {
     // Import SQL Modal close
     document.getElementById('closeImportSqlModal').addEventListener('click', closeImportSqlModal);
     document.getElementById('cancelImportSqlBtn').addEventListener('click', closeImportSqlModal);
+    
+    // Script Group Modal
+    document.getElementById('closeScriptGroupModal').addEventListener('click', closeScriptGroupModal);
+    document.getElementById('cancelScriptGroupModalBtn').addEventListener('click', closeScriptGroupModal);
+    document.getElementById('scriptGroupForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        saveScriptGroup();
+    });
+    // Make scripts list clickable to add new scripts
+    const scriptsList = document.getElementById('scriptGroupScriptsList');
+    if (scriptsList) {
+        scriptsList.addEventListener('click', (e) => {
+            // Only trigger if clicking on the empty area, not on existing scripts
+            if (e.target === scriptsList || e.target.classList.contains('script-group-scripts-list')) {
+                const isInModal = document.getElementById('scriptGroupModal') && document.getElementById('scriptGroupModal').style.display !== 'none';
+                if (isInModal) {
+                    // In modal - get group from editingActionId or create temp
+                    let group = null;
+                    if (editingActionId) {
+                        group = allActions.find(a => a.id === editingActionId);
+                    }
+                    if (!group) {
+                        // Creating new - will be saved when modal is saved
+                        group = window.tempScriptGroup || {
+                            id: 'script_group_temp_' + Date.now(),
+                            kind: 'script_group',
+                            title: document.getElementById('scriptGroupTitleInput').value.trim(),
+                            description: document.getElementById('scriptGroupDescription').value.trim(),
+                            scripts: []
+                        };
+                        window.tempScriptGroup = group;
+                    }
+                    // Automatically open script editor for raw SQL block
+                    openScriptEditorModal('raw_sql_block', null, group);
+                }
+            }
+        });
+    }
+    
+    // Script Editor Modal
+    document.getElementById('closeScriptEditorModal').addEventListener('click', closeScriptEditorModal);
+    document.getElementById('cancelScriptEditorModalBtn').addEventListener('click', closeScriptEditorModal);
+    
+    // Setup script editor modal listeners (will be called when modal opens)
+    setupScriptEditorModalListeners();
     
     // Import SQL Parse button
     document.getElementById('parseImportSqlBtn').addEventListener('click', (e) => {
@@ -2322,11 +2385,17 @@ function editAction(actionId) {
     const action = allActions.find(a => a.id === actionId);
     if (!action || action.isBuiltIn) return;
     
+    // Check if it's a Script Group
+    if (action.kind === 'script_group') {
+        openScriptGroupModal(actionId);
+        return;
+    }
+    
     // Check if it's a Free SQL query
     if (action.kind === 'free_sql') {
         openFreeSqlModal(actionId);
     } else {
-    openActionModal(actionId);
+        openActionModal(actionId);
     }
 }
 
@@ -2357,13 +2426,22 @@ function cloneAction(actionId) {
     const action = allActions.find(a => a.id === actionId);
     if (!action) return;
     
-    // Create a copy with new ID
-    const cloned = {
-        ...action,
-        id: generateCustomActionId(),
-        title: action.title + ' (Copy)',
-        isBuiltIn: false
-    };
+    // Create a deep copy
+    const cloned = JSON.parse(JSON.stringify(action));
+    
+    // Generate new ID
+    cloned.id = generateCustomActionId();
+    cloned.title = action.title + ' (Copy)';
+    cloned.isBuiltIn = false;
+    cloned.isShared = false;
+    
+    // Handle script groups - deep clone scripts array with new IDs
+    if (cloned.kind === 'script_group' && cloned.scripts) {
+        cloned.scripts = cloned.scripts.map(script => ({
+            ...script,
+            id: 'sg_item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+        }));
+    }
     
     allActions.push(cloned);
     saveCustomActions();
@@ -2601,6 +2679,1095 @@ async function removeFromShared(actionId) {
     }
 }
 
+// ============================================================================
+// Script Group Functions
+// ============================================================================
+
+/**
+ * Ensure trailing semicolon if enabled
+ */
+function ensureTrailingSemicolon(text, enabled) {
+    if (!enabled) return text;
+    const trimmed = text.trimRight();
+    if (trimmed.endsWith(';')) {
+        return text; // Already has semicolon
+    }
+    return text + ';';
+}
+
+/**
+ * Generate SQL for individual script (handles both types)
+ */
+function generateScriptSQL(script, storeNos) {
+    if (script.type === 'raw_sql_block') {
+        return ensureTrailingSemicolon(script.sqlBlock, script.ensureTrailingSemicolon !== false);
+    } else if (script.type === 'update_json_set') {
+        // Build SQL using script's rows array
+        const rows = script.rows || [];
+        if (rows.length === 0) {
+            return '';
+        }
+        
+        // Parse StoreNos
+        const storeNosResult = parseStoreNos(storeNos);
+        if (!storeNosResult.valid || storeNosResult.stores.length === 0) {
+            return '';
+        }
+        
+        // Build JSON_SET arguments from rows
+        const jsonSetArgs = [];
+        rows.forEach(row => {
+            const path = ensureJsonPathPrefix(row.path);
+            const value = formatSqlValue(row.valueType, row.value);
+            jsonSetArgs.push(`'${path}', ${value}`);
+        });
+        
+        const tableName = script.tableName || 'StoreStations';
+        const configColumn = script.configColumn || 'Configuration';
+        const stationColumn = script.stationColumn || 'StationId';
+        const stationId = script.stationId || '';
+        const storeColumn = script.storeColumn || 'StoreNo';
+        const storeNosStr = storeNosResult.stores.join(', ');
+        
+        return `UPDATE ${tableName}
+SET ${configColumn} = JSON_SET(${configColumn}, ${jsonSetArgs.join(', ')})
+WHERE ${stationColumn} = '${escapeSqlString(stationId)}'
+AND ${storeColumn} IN (${storeNosStr});`;
+    }
+    return '';
+}
+
+/**
+ * Build combined output for all scripts in group
+ */
+function buildScriptGroupOutput(group, storeNos) {
+    const parts = [];
+    group.scripts.forEach((script, index) => {
+        const number = index + 1;
+        parts.push(`/* ${number}) ${script.title} */`);
+        
+        const sql = generateScriptSQL(script, storeNos);
+        parts.push(sql);
+        parts.push(''); // Empty line between scripts
+    });
+    
+    return parts.join('\n');
+}
+
+/**
+ * Render form for script group
+ */
+function renderScriptGroupForm(action) {
+    const formContainer = document.getElementById('formContainer');
+    const lastStoreNos = localStorage.getItem('lastStoreNos') || '';
+    
+    const scriptsHtml = action.scripts && action.scripts.length > 0
+        ? action.scripts.map((script, index) => {
+            const typeBadge = script.type === 'raw_sql_block' ? 'RAW SQL' : 'JSON_SET';
+            return `
+                <div class="script-item" data-script-id="${script.id}">
+                    <div class="script-item-header">
+                        <span class="script-type-badge">${typeBadge}</span>
+                        <strong>${escapeHtml(script.title)}</strong>
+                        <div class="script-actions">
+                            <button type="button" class="btn btn-small" onclick="editScriptInGroup('${script.id}')">Edit</button>
+                            <button type="button" class="btn btn-small" onclick="moveScriptUp('${script.id}')" ${index === 0 ? 'disabled' : ''}>↑</button>
+                            <button type="button" class="btn btn-small" onclick="moveScriptDown('${script.id}')" ${index === action.scripts.length - 1 ? 'disabled' : ''}>↓</button>
+                            <button type="button" class="btn btn-small btn-danger" onclick="removeScriptFromGroup('${script.id}')">Delete</button>
+                        </div>
+                    </div>
+                    ${script.description ? `<div style="color: #666; font-size: 12px; margin-top: 4px;">${escapeHtml(script.description)}</div>` : ''}
+                </div>
+            `;
+        }).join('')
+        : '<p style="color: #999; padding: 10px;">No scripts added yet. Click "Add Script" to get started.</p>';
+    
+    formContainer.innerHTML = `
+        <div class="title-header">
+            <h3 id="actionTitleDisplay">${escapeHtml(action.title)}</h3>
+            ${!action.isBuiltIn ? `
+                <button class="btn-edit-title" id="editTitleBtn" title="Edit title">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M11.333 2.00001C11.5084 1.82445 11.7163 1.68506 11.9448 1.58933C12.1733 1.4936 12.4179 1.44336 12.6663 1.44336C12.9148 1.44336 13.1594 1.4936 13.3879 1.58933C13.6164 1.68506 13.8243 1.82445 13.9997 2.00001C14.1752 2.17557 14.3146 2.38345 14.4103 2.61194C14.5061 2.84043 14.5563 3.08501 14.5563 3.33345C14.5563 3.58189 14.5061 3.82647 14.4103 4.05496C14.3146 4.28345 14.1752 4.49133 13.9997 4.66689L5.33301 13.3336L1.33301 14.6669L2.66634 10.6669L11.333 2.00001Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            ` : ''}
+        </div>
+        ${action.description ? `<p style="color: #666; margin-bottom: 20px;">${escapeHtml(action.description)}</p>` : ''}
+        
+        <form id="actionForm">
+            <div class="form-group">
+                <label for="storeNos">StoreNos (for JSON_SET scripts)</label>
+                <textarea id="storeNos" placeholder="123, 124, 125 or 100-105 or one per line">${escapeHtml(lastStoreNos)}</textarea>
+                <div id="storeNosError" class="error-message" style="display: none;"></div>
+                <div id="storeNosCount" class="store-count"></div>
+            </div>
+            
+            <div class="form-group">
+                <label>Scripts</label>
+                <button type="button" class="btn btn-secondary" id="addScriptToGroupFormBtn" style="margin-bottom: 10px;">+ Add Script</button>
+                <div id="scriptGroupScriptsList" class="script-group-scripts-list" style="min-height: 100px;">
+                    ${scriptsHtml}
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Generate All</button>
+        </form>
+    `;
+    
+    // Add Script button in form view
+    const addScriptBtn = document.getElementById('addScriptToGroupFormBtn');
+    if (addScriptBtn) {
+        addScriptBtn.addEventListener('click', () => {
+            showScriptTypeChooser();
+        });
+    }
+    
+    const storeNosInput = document.getElementById('storeNos');
+    if (storeNosInput) {
+        storeNosInput.addEventListener('input', validateAndPreviewStoreNos);
+    }
+    
+    document.getElementById('actionForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        generateScriptGroupSQL();
+    });
+    
+    // Add title edit functionality
+    setupTitleEdit();
+    
+    // Initial validation
+    validateAndPreviewStoreNos();
+}
+
+/**
+ * Show script type chooser
+ */
+function showScriptTypeChooser() {
+    const isInModal = editingActionId !== null || !selectedAction;
+    const targetGroup = selectedAction || (editingActionId ? allActions.find(a => a.id === editingActionId) : null);
+    
+    // Simple prompt for now - can be improved with a modal later
+    const choice = confirm('Click OK for Raw SQL Block\nClick Cancel for JSON_SET Update');
+    if (choice) {
+        openScriptEditorModal('raw_sql_block', null, targetGroup);
+    } else {
+        openScriptEditorModal('update_json_set', null, targetGroup);
+    }
+}
+
+/**
+ * Generate SQL for script group
+ */
+function generateScriptGroupSQL() {
+    if (!selectedAction || selectedAction.kind !== 'script_group') return;
+    
+    const storeNosInput = document.getElementById('storeNos').value;
+    
+    // Validate StoreNos (only needed for JSON_SET scripts, but validate anyway)
+    const storeNosResult = parseStoreNos(storeNosInput);
+    if (!storeNosResult.valid) {
+        alert('Please fix StoreNos errors before generating SQL');
+        return;
+    }
+    
+    // Check if there are any JSON_SET scripts that need StoreNos
+    const hasJsonSetScripts = selectedAction.scripts && selectedAction.scripts.some(s => s.type === 'update_json_set');
+    if (hasJsonSetScripts && storeNosResult.stores.length === 0) {
+        alert('StoreNos are required for JSON_SET scripts');
+        return;
+    }
+    
+    // Generate combined output
+    const output = buildScriptGroupOutput(selectedAction, storeNosInput);
+    
+    // Display SQL
+    const sqlOutput = document.getElementById('sqlOutput');
+    const outputContainer = document.getElementById('outputContainer');
+    sqlOutput.textContent = output;
+    outputContainer.style.display = 'block';
+    
+    // Apply formatting if enabled
+    updateSQLFormatting();
+    
+    // Save last used values
+    localStorage.setItem('lastStoreNos', storeNosInput);
+}
+
+/**
+ * Open script group modal for creating/editing
+ */
+function openScriptGroupModal(actionId) {
+    editingActionId = actionId;
+    const modal = document.getElementById('scriptGroupModal');
+    const titleEl = document.getElementById('scriptGroupModalTitle');
+    
+    if (actionId) {
+        // Editing existing
+        const action = allActions.find(a => a.id === actionId);
+        if (!action || action.kind !== 'script_group') return;
+        
+        titleEl.textContent = 'Edit Script Group';
+        document.getElementById('scriptGroupTitleInput').value = action.title || '';
+        document.getElementById('scriptGroupDescription').value = action.description || '';
+        
+        // Render scripts list
+        renderScriptGroupScriptsList(action);
+    } else {
+        // Creating new
+        titleEl.textContent = 'Create Script Group';
+        document.getElementById('scriptGroupTitleInput').value = '';
+        document.getElementById('scriptGroupDescription').value = '';
+        document.getElementById('scriptGroupScriptsList').innerHTML = '<p style="color: #999; padding: 10px;">Click anywhere in this area or start typing to add your first script...</p>';
+        
+        // Clear temp group
+        window.tempScriptGroup = null;
+    }
+    
+    modal.style.display = 'block';
+    
+    // If creating new and no scripts, automatically open script editor after a short delay
+    if (!actionId) {
+        setTimeout(() => {
+            // Check if user hasn't already started adding scripts
+            if (!window.tempScriptGroup || !window.tempScriptGroup.scripts || window.tempScriptGroup.scripts.length === 0) {
+                // Automatically open script editor for raw SQL block (most common use case)
+                const tempGroup = {
+                    id: 'script_group_temp_' + Date.now(),
+                    kind: 'script_group',
+                    title: '',
+                    description: '',
+                    scripts: []
+                };
+                window.tempScriptGroup = tempGroup;
+                openScriptEditorModal('raw_sql_block', null, tempGroup);
+            }
+        }, 300);
+    }
+}
+
+/**
+ * Close script group modal
+ */
+function closeScriptGroupModal() {
+    document.getElementById('scriptGroupModal').style.display = 'none';
+    editingActionId = null;
+    window.tempScriptGroup = null; // Clear temporary group
+}
+
+/**
+ * Render scripts list in modal
+ */
+function renderScriptGroupScriptsList(group) {
+    const container = document.getElementById('scriptGroupScriptsList');
+    if (!group || !group.scripts || group.scripts.length === 0) {
+        container.innerHTML = '<p style="color: #999; padding: 10px;">No scripts added yet.</p>';
+        return;
+    }
+    
+    container.innerHTML = group.scripts.map((script, index) => {
+        const typeBadge = script.type === 'raw_sql_block' ? 'RAW SQL' : 'JSON_SET';
+        return `
+            <div class="script-item" data-script-id="${script.id}">
+                <div class="script-item-header">
+                    <span class="script-type-badge">${typeBadge}</span>
+                    <strong>${escapeHtml(script.title)}</strong>
+                    <div class="script-actions">
+                        <button type="button" class="btn btn-small" onclick="editScriptInGroupModal('${script.id}')">Edit</button>
+                        <button type="button" class="btn btn-small" onclick="moveScriptUpModal('${script.id}')" ${index === 0 ? 'disabled' : ''}>↑</button>
+                        <button type="button" class="btn btn-small" onclick="moveScriptDownModal('${script.id}')" ${index === group.scripts.length - 1 ? 'disabled' : ''}>↓</button>
+                        <button type="button" class="btn btn-small btn-danger" onclick="removeScriptFromGroupModal('${script.id}')">Delete</button>
+                    </div>
+                </div>
+                ${script.description ? `<div style="color: #666; font-size: 12px; margin-top: 4px;">${escapeHtml(script.description)}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Open script editor modal
+ */
+function openScriptEditorModal(type, existingScript, groupAction) {
+    const modal = document.getElementById('scriptEditorModal');
+    const titleEl = document.getElementById('scriptEditorModalTitle');
+    const rawSqlContainer = document.getElementById('scriptEditorRawSqlContainer');
+    const jsonSetContainer = document.getElementById('scriptEditorJsonSetContainer');
+    
+    // Determine if we're in modal or form context
+    const isInModal = document.getElementById('scriptGroupModal') && document.getElementById('scriptGroupModal').style.display !== 'none';
+    let targetGroup = groupAction;
+    
+    // If no groupAction provided, try to get from context
+    if (!targetGroup) {
+        if (isInModal) {
+            // In modal - try editingActionId or temp group
+            if (editingActionId) {
+                targetGroup = allActions.find(a => a.id === editingActionId);
+            }
+            if (!targetGroup) {
+                targetGroup = window.tempScriptGroup;
+            }
+        } else {
+            // In form - use selectedAction
+            targetGroup = selectedAction;
+        }
+    }
+    
+    // If still no group, create a temporary one (for new script groups)
+    if (!targetGroup) {
+        targetGroup = {
+            id: 'script_group_temp_' + Date.now(),
+            kind: 'script_group',
+            title: '',
+            description: '',
+            scripts: []
+        };
+        window.tempScriptGroup = targetGroup;
+    }
+    
+    if (type === 'raw_sql_block') {
+        titleEl.textContent = existingScript ? 'Edit Raw SQL Block' : 'Add Raw SQL Block';
+        rawSqlContainer.style.display = 'block';
+        jsonSetContainer.style.display = 'none';
+        
+        if (existingScript) {
+            document.getElementById('scriptEditorTitleInput').value = existingScript.title || '';
+            document.getElementById('scriptEditorDescription').value = existingScript.description || '';
+            document.getElementById('scriptEditorSqlBlock').value = existingScript.sqlBlock || '';
+            document.getElementById('scriptEditorEnsureSemicolon').checked = existingScript.ensureTrailingSemicolon !== false;
+        } else {
+            document.getElementById('scriptEditorTitleInput').value = '';
+            document.getElementById('scriptEditorDescription').value = '';
+            document.getElementById('scriptEditorSqlBlock').value = '';
+            document.getElementById('scriptEditorEnsureSemicolon').checked = true;
+        }
+    } else if (type === 'update_json_set') {
+        titleEl.textContent = existingScript ? 'Edit JSON_SET Update' : 'Add JSON_SET Update';
+        rawSqlContainer.style.display = 'none';
+        jsonSetContainer.style.display = 'block';
+        
+        if (existingScript) {
+            document.getElementById('scriptEditorJsonSetTitleInput').value = existingScript.title || '';
+            document.getElementById('scriptEditorJsonSetStationId').value = existingScript.stationId || '';
+            document.getElementById('scriptEditorJsonSetTableName').value = existingScript.tableName || 'StoreStations';
+            document.getElementById('scriptEditorJsonSetStationColumn').value = existingScript.stationColumn || 'StationId';
+            document.getElementById('scriptEditorJsonSetStoreColumn').value = existingScript.storeColumn || 'StoreNo';
+            document.getElementById('scriptEditorJsonSetConfigColumn').value = existingScript.configColumn || 'Configuration';
+            
+            // Handle rows
+            if (existingScript.rows && existingScript.rows.length > 1) {
+                // Multi-mode
+                document.getElementById('scriptEditorJsonSetSingleContainer').style.display = 'none';
+                document.getElementById('scriptEditorJsonSetMultiContainer').style.display = 'block';
+                renderScriptEditorJsonSetMultiRows(existingScript.rows);
+            } else {
+                // Single mode
+                document.getElementById('scriptEditorJsonSetSingleContainer').style.display = 'block';
+                document.getElementById('scriptEditorJsonSetMultiContainer').style.display = 'none';
+                const firstRow = existingScript.rows && existingScript.rows.length > 0 ? existingScript.rows[0] : {};
+                document.getElementById('scriptEditorJsonSetJsonPath').value = firstRow.path || '';
+                document.getElementById('scriptEditorJsonSetValueType').value = firstRow.valueType || 'string';
+                updateScriptEditorJsonSetValueInput(firstRow.valueType || 'string');
+                const valueInput = document.getElementById('scriptEditorJsonSetValue');
+                if (valueInput) {
+                    if (firstRow.valueType === 'boolean') {
+                        valueInput.value = firstRow.value === 'true' || firstRow.value === true ? 'true' : 'false';
+                    } else {
+                        valueInput.value = firstRow.value || '';
+                    }
+                }
+            }
+        } else {
+            // New script - defaults
+            document.getElementById('scriptEditorJsonSetTitleInput').value = '';
+            document.getElementById('scriptEditorJsonSetDescription').value = '';
+            document.getElementById('scriptEditorJsonSetStationId').value = '';
+            document.getElementById('scriptEditorJsonSetTableName').value = 'StoreStations';
+            document.getElementById('scriptEditorJsonSetStationColumn').value = 'StationId';
+            document.getElementById('scriptEditorJsonSetStoreColumn').value = 'StoreNo';
+            document.getElementById('scriptEditorJsonSetConfigColumn').value = 'Configuration';
+            document.getElementById('scriptEditorJsonSetJsonPath').value = '';
+            document.getElementById('scriptEditorJsonSetValueType').value = 'string';
+            document.getElementById('scriptEditorJsonSetSingleContainer').style.display = 'block';
+            document.getElementById('scriptEditorJsonSetMultiContainer').style.display = 'none';
+            updateScriptEditorJsonSetValueInput('string');
+        }
+    }
+    
+    // Store context for save
+    window.currentScriptEditorContext = {
+        type,
+        existingScript,
+        groupAction: targetGroup,
+        isInModal
+    };
+    
+    // Setup auto-prefix for JSON path input
+    setTimeout(() => {
+        const jsonPathInput = document.getElementById('scriptEditorJsonSetJsonPath');
+        if (jsonPathInput && !jsonPathInput.dataset.listenerAttached) {
+            jsonPathInput.addEventListener('blur', (e) => {
+                const formatted = ensureJsonPathPrefix(e.target.value);
+                if (formatted !== e.target.value) {
+                    e.target.value = formatted;
+                }
+            });
+            jsonPathInput.dataset.listenerAttached = 'true';
+        }
+    }, 100);
+    
+    // Setup form submit handler (ensure it's attached when modal opens)
+    setTimeout(() => {
+        const form = document.getElementById('scriptEditorForm');
+        if (form) {
+            // Remove old listener if exists
+            if (form.dataset.submitListenerAttached) {
+                form.removeEventListener('submit', form._submitHandler);
+            }
+            
+            // Create new handler
+            form._submitHandler = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                saveScriptFromEditor();
+                return false;
+            };
+            
+            form.addEventListener('submit', form._submitHandler);
+            form.dataset.submitListenerAttached = 'true';
+        }
+        
+        // Also attach click handler to Save button as backup
+        const saveBtn = form ? form.querySelector('button[type="submit"]') : null;
+        if (saveBtn && !saveBtn.dataset.clickListenerAttached) {
+            saveBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                saveScriptFromEditor();
+                return false;
+            });
+            saveBtn.dataset.clickListenerAttached = 'true';
+        }
+    }, 50);
+    
+    modal.style.display = 'block';
+}
+
+/**
+ * Close script editor modal
+ */
+function closeScriptEditorModal() {
+    document.getElementById('scriptEditorModal').style.display = 'none';
+    window.currentScriptEditorContext = null;
+}
+
+/**
+ * Save script from editor
+ */
+function saveScriptFromEditor() {
+    const context = window.currentScriptEditorContext;
+    if (!context) {
+        alert('Error: No context found. Please try again.');
+        return;
+    }
+    
+    const { type, existingScript, groupAction, isInModal } = context;
+    let targetGroup = groupAction || selectedAction;
+    
+    // If in modal and no group yet, use temp group or create one
+    if (isInModal && !targetGroup) {
+        targetGroup = window.tempScriptGroup;
+    }
+    
+    // If still no group, create a temporary one
+    if (!targetGroup) {
+        targetGroup = {
+            id: 'script_group_temp_' + Date.now(),
+            kind: 'script_group',
+            title: '',
+            description: '',
+            scripts: []
+        };
+        window.tempScriptGroup = targetGroup;
+    }
+    
+    if (targetGroup.kind !== 'script_group') {
+        alert('Error: Invalid script group. Please try again.');
+        return;
+    }
+    
+    let script = existingScript ? { ...existingScript } : {
+        id: 'sg_item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        type: type
+    };
+    
+    if (type === 'raw_sql_block') {
+        const title = document.getElementById('scriptEditorTitleInput').value.trim();
+        const description = document.getElementById('scriptEditorDescription').value.trim();
+        const sqlBlock = document.getElementById('scriptEditorSqlBlock').value.trim();
+        const ensureSemicolon = document.getElementById('scriptEditorEnsureSemicolon').checked;
+        
+        if (!title || !sqlBlock) {
+            alert('Please fill in all required fields');
+            return;
+        }
+        
+        script.title = title;
+        script.description = description || undefined; // Store only if not empty
+        script.sqlBlock = sqlBlock;
+        script.ensureTrailingSemicolon = ensureSemicolon;
+    } else if (type === 'update_json_set') {
+        const title = document.getElementById('scriptEditorJsonSetTitleInput').value.trim();
+        const description = document.getElementById('scriptEditorJsonSetDescription').value.trim();
+        const stationId = document.getElementById('scriptEditorJsonSetStationId').value.trim();
+        const tableName = document.getElementById('scriptEditorJsonSetTableName').value.trim() || 'StoreStations';
+        const stationColumn = document.getElementById('scriptEditorJsonSetStationColumn').value.trim() || 'StationId';
+        const storeColumn = document.getElementById('scriptEditorJsonSetStoreColumn').value.trim() || 'StoreNo';
+        const configColumn = document.getElementById('scriptEditorJsonSetConfigColumn').value.trim() || 'Configuration';
+        
+        if (!title || !stationId) {
+            alert('Please fill in all required fields');
+            return;
+        }
+        
+        // Get rows
+        let rows = [];
+        const multiContainer = document.getElementById('scriptEditorJsonSetMultiContainer');
+        if (multiContainer.style.display !== 'none') {
+            // Multi-mode
+            rows = getScriptEditorJsonSetMultiRows();
+        } else {
+            // Single mode
+            const jsonPath = ensureJsonPathPrefix(document.getElementById('scriptEditorJsonSetJsonPath').value.trim());
+            const valueType = document.getElementById('scriptEditorJsonSetValueType').value;
+            const valueInput = document.getElementById('scriptEditorJsonSetValue');
+            let value = '';
+            if (valueType === 'boolean') {
+                value = valueInput.value === 'true' ? 'true' : 'false';
+            } else {
+                value = valueInput.value.trim();
+            }
+            
+            if (!jsonPath) {
+                alert('JSON Path is required');
+                return;
+            }
+            
+            rows = [{ path: jsonPath, valueType, value }];
+        }
+        
+        if (rows.length === 0) {
+            alert('At least one JSON path/value pair is required');
+            return;
+        }
+        
+        script.title = title;
+        script.description = description || undefined; // Store only if not empty
+        script.stationId = stationId;
+        script.tableName = tableName;
+        script.stationColumn = stationColumn;
+        script.storeColumn = storeColumn;
+        script.configColumn = configColumn;
+        script.rows = rows;
+    }
+    
+    // Add or update script in group
+    if (!targetGroup.scripts) {
+        targetGroup.scripts = [];
+    }
+    
+    if (existingScript) {
+        // Update existing
+        const index = targetGroup.scripts.findIndex(s => s.id === existingScript.id);
+        if (index !== -1) {
+            targetGroup.scripts[index] = script;
+        }
+    } else {
+        // Add new
+        targetGroup.scripts.push(script);
+    }
+    
+    // If in modal and creating new group, store in window temporarily
+    if (isInModal && !editingActionId) {
+        window.tempScriptGroup = targetGroup;
+    } else {
+        // Update in allActions
+        const actionIndex = allActions.findIndex(a => a.id === targetGroup.id);
+        if (actionIndex !== -1) {
+            allActions[actionIndex] = targetGroup;
+        } else if (editingActionId) {
+            // Editing existing - update it
+            const editIndex = allActions.findIndex(a => a.id === editingActionId);
+            if (editIndex !== -1) {
+                allActions[editIndex] = targetGroup;
+            }
+        }
+    }
+    
+    // Save only if not temporary
+    if (!isInModal || editingActionId) {
+        saveCustomActions();
+    }
+    
+    // Refresh UI
+    if (isInModal) {
+        renderScriptGroupScriptsList(targetGroup);
+    } else {
+        renderScriptGroupForm(targetGroup);
+        selectedAction = targetGroup;
+    }
+    
+    closeScriptEditorModal();
+}
+
+/**
+ * Remove script from group
+ */
+function removeScriptFromGroup(scriptId) {
+    if (!selectedAction || selectedAction.kind !== 'script_group') return;
+    if (!confirm('Are you sure you want to remove this script?')) return;
+    
+    selectedAction.scripts = selectedAction.scripts.filter(s => s.id !== scriptId);
+    
+    // Update in allActions
+    const actionIndex = allActions.findIndex(a => a.id === selectedAction.id);
+    if (actionIndex !== -1) {
+        allActions[actionIndex] = selectedAction;
+    }
+    
+    saveCustomActions();
+    renderScriptGroupForm(selectedAction);
+}
+
+/**
+ * Move script up
+ */
+function moveScriptUp(scriptId) {
+    if (!selectedAction || selectedAction.kind !== 'script_group') return;
+    
+    const scripts = selectedAction.scripts;
+    const index = scripts.findIndex(s => s.id === scriptId);
+    if (index <= 0) return;
+    
+    // Swap with previous
+    [scripts[index - 1], scripts[index]] = [scripts[index], scripts[index - 1]];
+    
+    // Update in allActions
+    const actionIndex = allActions.findIndex(a => a.id === selectedAction.id);
+    if (actionIndex !== -1) {
+        allActions[actionIndex] = selectedAction;
+    }
+    
+    saveCustomActions();
+    renderScriptGroupForm(selectedAction);
+}
+
+/**
+ * Move script down
+ */
+function moveScriptDown(scriptId) {
+    if (!selectedAction || selectedAction.kind !== 'script_group') return;
+    
+    const scripts = selectedAction.scripts;
+    const index = scripts.findIndex(s => s.id === scriptId);
+    if (index < 0 || index >= scripts.length - 1) return;
+    
+    // Swap with next
+    [scripts[index], scripts[index + 1]] = [scripts[index + 1], scripts[index]];
+    
+    // Update in allActions
+    const actionIndex = allActions.findIndex(a => a.id === selectedAction.id);
+    if (actionIndex !== -1) {
+        allActions[actionIndex] = selectedAction;
+    }
+    
+    saveCustomActions();
+    renderScriptGroupForm(selectedAction);
+}
+
+/**
+ * Edit script in group (from form)
+ */
+function editScriptInGroup(scriptId) {
+    if (!selectedAction || selectedAction.kind !== 'script_group') return;
+    const script = selectedAction.scripts.find(s => s.id === scriptId);
+    if (!script) return;
+    openScriptEditorModal(script.type, script, selectedAction);
+}
+
+/**
+ * Modal versions of script management functions
+ */
+function removeScriptFromGroupModal(scriptId) {
+    const titleInput = document.getElementById('scriptGroupTitleInput');
+    const descInput = document.getElementById('scriptGroupDescription');
+    
+    // Get current group (either editing, temp, or create new)
+    let group = null;
+    if (editingActionId) {
+        group = allActions.find(a => a.id === editingActionId);
+    } else if (window.tempScriptGroup) {
+        group = window.tempScriptGroup;
+    }
+    
+    if (!group) {
+        // Creating new - need to build from form or use temp
+        group = window.tempScriptGroup || {
+            id: 'script_group_' + Date.now(),
+            kind: 'script_group',
+            title: titleInput.value.trim(),
+            description: descInput.value.trim(),
+            scripts: []
+        };
+        window.tempScriptGroup = group;
+    }
+    
+    if (!group.scripts) group.scripts = [];
+    group.scripts = group.scripts.filter(s => s.id !== scriptId);
+    renderScriptGroupScriptsList(group);
+}
+
+function moveScriptUpModal(scriptId) {
+    const titleInput = document.getElementById('scriptGroupTitleInput');
+    const descInput = document.getElementById('scriptGroupDescription');
+    
+    let group = null;
+    if (editingActionId) {
+        group = allActions.find(a => a.id === editingActionId);
+    } else if (window.tempScriptGroup) {
+        group = window.tempScriptGroup;
+    }
+    
+    if (!group) {
+        group = {
+            id: 'script_group_' + Date.now(),
+            kind: 'script_group',
+            title: titleInput.value.trim(),
+            description: descInput.value.trim(),
+            scripts: []
+        };
+        window.tempScriptGroup = group;
+    }
+    
+    if (!group.scripts) group.scripts = [];
+    const scripts = group.scripts;
+    const index = scripts.findIndex(s => s.id === scriptId);
+    if (index <= 0) return;
+    [scripts[index - 1], scripts[index]] = [scripts[index], scripts[index - 1]];
+    renderScriptGroupScriptsList(group);
+}
+
+function moveScriptDownModal(scriptId) {
+    const titleInput = document.getElementById('scriptGroupTitleInput');
+    const descInput = document.getElementById('scriptGroupDescription');
+    
+    let group = null;
+    if (editingActionId) {
+        group = allActions.find(a => a.id === editingActionId);
+    } else if (window.tempScriptGroup) {
+        group = window.tempScriptGroup;
+    }
+    
+    if (!group) {
+        group = {
+            id: 'script_group_' + Date.now(),
+            kind: 'script_group',
+            title: titleInput.value.trim(),
+            description: descInput.value.trim(),
+            scripts: []
+        };
+        window.tempScriptGroup = group;
+    }
+    
+    if (!group.scripts) group.scripts = [];
+    const scripts = group.scripts;
+    const index = scripts.findIndex(s => s.id === scriptId);
+    if (index < 0 || index >= scripts.length - 1) return;
+    [scripts[index], scripts[index + 1]] = [scripts[index + 1], scripts[index]];
+    renderScriptGroupScriptsList(group);
+}
+
+function editScriptInGroupModal(scriptId) {
+    const titleInput = document.getElementById('scriptGroupTitleInput');
+    const descInput = document.getElementById('scriptGroupDescription');
+    
+    let group = null;
+    if (editingActionId) {
+        group = allActions.find(a => a.id === editingActionId);
+    } else if (window.tempScriptGroup) {
+        group = window.tempScriptGroup;
+    }
+    
+    if (!group) {
+        group = {
+            id: 'script_group_' + Date.now(),
+            kind: 'script_group',
+            title: titleInput.value.trim(),
+            description: descInput.value.trim(),
+            scripts: []
+        };
+        window.tempScriptGroup = group;
+    }
+    
+    if (!group.scripts) group.scripts = [];
+    const script = group.scripts.find(s => s.id === scriptId);
+    if (!script) return;
+    openScriptEditorModal(script.type, script, group);
+}
+
+/**
+ * Save script group from modal
+ */
+function saveScriptGroup() {
+    const title = document.getElementById('scriptGroupTitleInput').value.trim();
+    if (!title) {
+        alert('Title is required');
+        return;
+    }
+    
+    const description = document.getElementById('scriptGroupDescription').value.trim();
+    
+    // Get current group state
+    let group = null;
+    if (editingActionId) {
+        group = allActions.find(a => a.id === editingActionId);
+    } else if (window.tempScriptGroup) {
+        // Use temporary group created during script editing
+        group = window.tempScriptGroup;
+    }
+    
+    if (!group) {
+        // Create new
+        group = {
+            id: 'script_group_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            kind: 'script_group',
+            title,
+            description,
+            scripts: []
+        };
+    } else {
+        // Update existing
+        group.title = title;
+        group.description = description;
+    }
+    
+    // Validate at least one script
+    if (!group.scripts || group.scripts.length === 0) {
+        alert('Script group must have at least one script');
+        return;
+    }
+    
+    // Update or add to allActions
+    if (editingActionId) {
+        const index = allActions.findIndex(a => a.id === editingActionId);
+        if (index !== -1) {
+            allActions[index] = group;
+        }
+    } else {
+        allActions.push(group);
+    }
+    
+    // Clear temporary group
+    window.tempScriptGroup = null;
+    
+    saveCustomActions();
+    renderActionsList();
+    closeScriptGroupModal();
+    
+    // Select the new/edited action
+    selectAction(group.id);
+}
+
+/**
+ * Helper functions for JSON_SET editor in script editor modal
+ */
+let scriptEditorJsonSetMultiRows = [];
+
+function renderScriptEditorJsonSetMultiRows(rows) {
+    scriptEditorJsonSetMultiRows = rows ? [...rows] : [{ path: '$.', valueType: 'string', value: '' }];
+    const container = document.getElementById('scriptEditorJsonSetMultiRowsContainer');
+    container.innerHTML = scriptEditorJsonSetMultiRows.map((row, index) => {
+        return getScriptEditorJsonSetRowHtml(row, index);
+    }).join('');
+    
+    // Setup auto-prefix for JSON paths
+    setTimeout(() => {
+        const jsonPathInputs = container.querySelectorAll('.script-editor-json-path');
+        jsonPathInputs.forEach(input => {
+            if (!input.dataset.listenerAttached) {
+                input.addEventListener('blur', (e) => {
+                    const formatted = ensureJsonPathPrefix(e.target.value);
+                    if (formatted !== e.target.value) {
+                        e.target.value = formatted;
+                    }
+                });
+                input.dataset.listenerAttached = 'true';
+            }
+        });
+    }, 50);
+}
+
+function getScriptEditorJsonSetRowHtml(row, index) {
+    const valueHtml = getScriptEditorJsonSetValueInputHtml(row.valueType, row.value, index);
+    return `
+        <div class="multi-row" data-row-index="${index}">
+            <div class="multi-row-item">
+                <label>JSON Path *</label>
+                <input type="text" class="script-editor-json-path" data-index="${index}" value="${escapeHtml(row.path || '$.')}" placeholder="$.cancelOrder">
+            </div>
+            <div class="multi-row-item">
+                <label>Value Type *</label>
+                <select class="script-editor-value-type" data-index="${index}">
+                    <option value="boolean" ${row.valueType === 'boolean' ? 'selected' : ''}>Boolean</option>
+                    <option value="string" ${row.valueType === 'string' ? 'selected' : ''}>String</option>
+                    <option value="number" ${row.valueType === 'number' ? 'selected' : ''}>Number</option>
+                </select>
+            </div>
+            <div class="multi-row-item">
+                <label>Value *</label>
+                ${valueHtml}
+            </div>
+            <div class="multi-row-actions">
+                <button type="button" class="btn btn-small btn-danger" onclick="removeScriptEditorJsonSetRow(${index})">Remove</button>
+            </div>
+        </div>
+    `;
+}
+
+function getScriptEditorJsonSetValueInputHtml(valueType, value, index) {
+    if (valueType === 'boolean') {
+        const boolValue = value === 'true' || value === true ? 'true' : 'false';
+        return `
+            <select class="script-editor-value" data-index="${index}">
+                <option value="true" ${boolValue === 'true' ? 'selected' : ''}>true</option>
+                <option value="false" ${boolValue === 'false' ? 'selected' : ''}>false</option>
+            </select>
+        `;
+    } else {
+        return `<input type="${valueType === 'number' ? 'number' : 'text'}" class="script-editor-value" data-index="${index}" value="${escapeHtml(value || '')}">`;
+    }
+}
+
+function updateScriptEditorJsonSetValueInput(valueType) {
+    const container = document.getElementById('scriptEditorJsonSetValueContainer');
+    const valueInput = getScriptEditorJsonSetValueInputHtml(valueType, '', 0);
+    container.innerHTML = valueInput;
+}
+
+function getScriptEditorJsonSetMultiRows() {
+    const container = document.getElementById('scriptEditorJsonSetMultiRowsContainer');
+    const rows = [];
+    const rowElements = container.querySelectorAll('.multi-row');
+    
+    rowElements.forEach((rowEl, index) => {
+        const pathInput = rowEl.querySelector('.script-editor-json-path');
+        const typeSelect = rowEl.querySelector('.script-editor-value-type');
+        const valueInput = rowEl.querySelector('.script-editor-value');
+        
+        if (pathInput && typeSelect && valueInput) {
+            const path = ensureJsonPathPrefix(pathInput.value.trim());
+            const valueType = typeSelect.value;
+            let value = valueInput.value;
+            if (valueType === 'boolean') {
+                value = value === 'true' ? 'true' : 'false';
+            } else {
+                value = value.trim();
+            }
+            
+            if (path) {
+                rows.push({ path, valueType, value });
+            }
+        }
+    });
+    
+    return rows;
+}
+
+function removeScriptEditorJsonSetRow(index) {
+    scriptEditorJsonSetMultiRows.splice(index, 1);
+    renderScriptEditorJsonSetMultiRows(scriptEditorJsonSetMultiRows);
+}
+
+// Make removeScriptEditorJsonSetRow available globally
+window.removeScriptEditorJsonSetRow = removeScriptEditorJsonSetRow;
+
+/**
+ * Setup event listeners for script editor modal
+ */
+function setupScriptEditorModalListeners() {
+    // Add value button for JSON_SET
+    const addValueBtn = document.getElementById('scriptEditorJsonSetAddValueBtn');
+    if (addValueBtn) {
+        addValueBtn.addEventListener('click', () => {
+            const singleContainer = document.getElementById('scriptEditorJsonSetSingleContainer');
+            const multiContainer = document.getElementById('scriptEditorJsonSetMultiContainer');
+            
+            // Get current single value
+            const jsonPath = ensureJsonPathPrefix(document.getElementById('scriptEditorJsonSetJsonPath').value.trim());
+            const valueType = document.getElementById('scriptEditorJsonSetValueType').value;
+            const valueInput = document.getElementById('scriptEditorJsonSetValue');
+            let value = '';
+            if (valueType === 'boolean') {
+                value = valueInput.value === 'true' ? 'true' : 'false';
+            } else {
+                value = valueInput.value.trim();
+            }
+            
+            // Switch to multi-mode
+            singleContainer.style.display = 'none';
+            multiContainer.style.display = 'block';
+            
+            // Initialize with first row
+            scriptEditorJsonSetMultiRows = [{ path: jsonPath || '$.', valueType, value }];
+            renderScriptEditorJsonSetMultiRows(scriptEditorJsonSetMultiRows);
+        });
+    }
+    
+    // Add row button
+    const addRowBtn = document.getElementById('scriptEditorJsonSetAddRowBtn');
+    if (addRowBtn) {
+        addRowBtn.addEventListener('click', () => {
+            scriptEditorJsonSetMultiRows.push({ path: '$.', valueType: 'string', value: '' });
+            renderScriptEditorJsonSetMultiRows(scriptEditorJsonSetMultiRows);
+        });
+    }
+    
+    // Value type change
+    const valueTypeSelect = document.getElementById('scriptEditorJsonSetValueType');
+    if (valueTypeSelect) {
+        valueTypeSelect.addEventListener('change', (e) => {
+            updateScriptEditorJsonSetValueInput(e.target.value);
+        });
+    }
+    
+    // Form submit
+    const form = document.getElementById('scriptEditorForm');
+    if (form) {
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            saveScriptFromEditor();
+        });
+    }
+    
+    // Auto-add "$." prefix to JSON paths in script editor modal
+    // This will be set up when modal opens, but we can also set up for dynamic inputs
+    setTimeout(() => {
+        const jsonPathInputs = document.querySelectorAll('.script-editor-json-path, #scriptEditorJsonSetJsonPath');
+        jsonPathInputs.forEach(input => {
+            if (!input.dataset.listenerAttached) {
+                input.addEventListener('blur', (e) => {
+                    const formatted = ensureJsonPathPrefix(e.target.value);
+                    if (formatted !== e.target.value) {
+                        e.target.value = formatted;
+                    }
+                });
+                input.dataset.listenerAttached = 'true';
+            }
+        });
+    }, 100);
+}
+
 // Make functions available globally for onclick handlers
 window.editAction = editAction;
 window.deleteAction = deleteAction;
@@ -2610,3 +3777,11 @@ window.removeModalMultiRowFromUI = removeModalMultiRowFromUI;
 window.addToShared = addToShared;
 window.addToLocal = addToLocal;
 window.removeFromShared = removeFromShared;
+window.editScriptInGroup = editScriptInGroup;
+window.removeScriptFromGroup = removeScriptFromGroup;
+window.moveScriptUp = moveScriptUp;
+window.moveScriptDown = moveScriptDown;
+window.editScriptInGroupModal = editScriptInGroupModal;
+window.removeScriptFromGroupModal = removeScriptFromGroupModal;
+window.moveScriptUpModal = moveScriptUpModal;
+window.moveScriptDownModal = moveScriptDownModal;
