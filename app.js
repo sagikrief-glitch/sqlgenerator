@@ -1834,7 +1834,7 @@ function openActionModal(actionId = null) {
         populateModalForm(action);
     } else {
         // Create mode
-        modalTitle.textContent = 'Add Action';
+        modalTitle.textContent = 'Create JSON_SET';
         form.reset();
         document.getElementById('modalTableName').value = 'StoreStations';
         document.getElementById('modalStationColumn').value = 'StationId';
