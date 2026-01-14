@@ -56,17 +56,43 @@ async function loadActions() {
     // Load built-in actions
     const builtInActions = ACTIONS.map(action => ({ ...action, isBuiltIn: true }));
     
-    // Load shared actions from GitHub (public, no token needed for reading)
+    // Load shared actions from Firebase Realtime Database (no token needed!)
     let sharedActions = [];
     try {
-        const response = await fetch(SHARED_CONFIGS_URL);
-        if (response.ok) {
-            sharedActions = await response.json();
-            // Mark as shared
-            sharedActions = sharedActions.map(action => ({ ...action, isShared: true, isBuiltIn: false }));
+        if (firebaseDb) {
+            // Try Firebase first
+            const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
+            const sharedData = snapshot.val();
+            if (sharedData) {
+                if (Array.isArray(sharedData)) {
+                    sharedActions = sharedData;
+                } else if (typeof sharedData === 'object') {
+                    // Convert object to array
+                    sharedActions = Object.values(sharedData);
+                }
+                // Mark as shared
+                sharedActions = sharedActions.map(action => ({ ...action, isShared: true, isBuiltIn: false }));
+            }
+        } else {
+            // Fallback to GitHub if Firebase not configured
+            const response = await fetch(SHARED_CONFIGS_URL);
+            if (response.ok) {
+                sharedActions = await response.json();
+                sharedActions = sharedActions.map(action => ({ ...action, isShared: true, isBuiltIn: false }));
+            }
         }
     } catch (error) {
         console.log('Could not load shared configurations:', error);
+        // Try GitHub fallback
+        try {
+            const response = await fetch(SHARED_CONFIGS_URL);
+            if (response.ok) {
+                sharedActions = await response.json();
+                sharedActions = sharedActions.map(action => ({ ...action, isShared: true, isBuiltIn: false }));
+            }
+        } catch (fallbackError) {
+            console.log('Fallback also failed:', fallbackError);
+        }
     }
     
     // Load custom actions from localStorage
@@ -2426,7 +2452,7 @@ function escapeHtml(text) {
 }
 
 /**
- * Add action to shared configurations (no token needed - uses GitHub via proxy)
+ * Add action to shared configurations (using Firebase - no token needed!)
  */
 async function addToShared(actionId) {
     const action = allActions.find(a => a.id === actionId);
@@ -2443,10 +2469,25 @@ async function addToShared(actionId) {
     
     try {
         // Get current shared configs
-        const response = await fetch(SHARED_CONFIGS_URL);
         let sharedConfigs = [];
-        if (response.ok) {
-            sharedConfigs = await response.json();
+        
+        if (firebaseDb) {
+            // Load from Firebase
+            const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
+            const sharedData = snapshot.val();
+            if (sharedData) {
+                if (Array.isArray(sharedData)) {
+                    sharedConfigs = sharedData;
+                } else if (typeof sharedData === 'object') {
+                    sharedConfigs = Object.values(sharedData);
+                }
+            }
+        } else {
+            // Fallback to GitHub if Firebase not configured
+            const response = await fetch(SHARED_CONFIGS_URL);
+            if (response.ok) {
+                sharedConfigs = await response.json();
+            }
         }
         
         // Check if action already exists in shared
@@ -2460,78 +2501,27 @@ async function addToShared(actionId) {
             sharedConfigs.push(actionToAdd);
         }
         
-        // Save using serverless function (no token needed on client!)
-        // The function handles GitHub API calls server-side
-        // Try Vercel function first, then Netlify, then fallback
-        const vercelUrl = window.location.origin + '/api/share-config';
-        const netlifyUrl = window.location.origin + '/.netlify/functions/share-config';
-        
-        let saved = false;
-        
-        // Try Vercel function
-        try {
-            const saveResponse = await fetch(vercelUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ configs: sharedConfigs })
-            });
-            
-            if (saveResponse.ok) {
-                const result = await saveResponse.json();
-                if (result.success) {
-                    saved = true;
-                    alert(`✅ Configuration "${action.title}" has been shared with the team!`);
-                    // Wait a moment for GitHub to update, then reload
-                    setTimeout(async () => {
-                        await loadActions();
-                        renderActionsList();
-                    }, 1500);
-                }
-            }
-        } catch (vercelError) {
-            console.log('Vercel function not available, trying Netlify...');
-        }
-        
-        // Try Netlify function if Vercel didn't work
-        if (!saved) {
-            try {
-                const saveResponse = await fetch(netlifyUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ configs: sharedConfigs })
-                });
-                
-                if (saveResponse.ok) {
-                    saved = true;
-                    alert(`✅ Configuration "${action.title}" has been shared with the team!`);
-                    setTimeout(async () => {
-                        await loadActions();
-                        renderActionsList();
-                    }, 1500);
-                }
-            } catch (netlifyError) {
-                console.log('Netlify function not available');
-            }
-        }
-        
-        // If both failed, show error
-        if (!saved) {
+        // Save to Firebase (no token needed!)
+        if (firebaseDb) {
+            await firebaseDb.ref('sharedConfigs').set(sharedConfigs);
+            alert(`✅ Configuration "${action.title}" has been shared with the team!`);
+            // Reload actions to get updated shared configs
+            await loadActions();
+            renderActionsList();
+        } else {
+            // Firebase not configured - show setup instructions
             alert(
-                `❌ Automatic sharing is not set up yet.\n\n` +
-                `Please deploy the serverless function:\n` +
-                `1. Deploy to Vercel or Netlify\n` +
-                `2. Add GITHUB_TOKEN environment variable\n` +
-                `3. See README_SHARING.md for details\n\n` +
-                `For now, the configuration is saved locally.`
+                `⚠️ Firebase is not configured yet.\n\n` +
+                `To enable sharing:\n` +
+                `1. Set up Firebase (see FIREBASE_SETUP.md)\n` +
+                `2. Update firebaseConfig in app.js with your Firebase credentials\n` +
+                `3. Refresh the page\n\n` +
+                `Configuration is saved locally for now.`
             );
         }
     } catch (error) {
-        alert('❌ Error sharing configuration: ' + error.message);
-        console.error('Error sharing:', error);
+        alert('❌ Error sharing configuration: ' + error.message + '\n\nMake sure Firebase is properly configured.');
+        console.error('Error sharing to Firebase:', error);
     } finally {
         if (shareBtn) {
             shareBtn.disabled = false;
