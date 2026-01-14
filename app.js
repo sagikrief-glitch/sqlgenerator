@@ -2,6 +2,10 @@
  * Main application logic for SQL Configuration Generator
  */
 
+// Shared configurations storage - using a simple approach
+// No tokens needed! Uses a public JSON file that can be updated
+const SHARED_CONFIGS_URL = 'https://raw.githubusercontent.com/sagikrief-glitch/sqlgenerator/master/shared-configs.json';
+
 // Application state
 let allActions = [];
 let selectedAction = null;
@@ -20,17 +24,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 /**
- * Load actions from built-in, shared configs, and localStorage
+ * Load actions from built-in, shared configs (Firebase), and localStorage
  */
 async function loadActions() {
     // Load built-in actions
     const builtInActions = ACTIONS.map(action => ({ ...action, isBuiltIn: true }));
     
-    // Load shared actions from GitHub
+    // Load shared actions from GitHub (public, no token needed for reading)
     let sharedActions = [];
     try {
-        const sharedConfigsUrl = 'https://raw.githubusercontent.com/sagikrief-glitch/sqlgenerator/master/shared-configs.json';
-        const response = await fetch(sharedConfigsUrl);
+        const response = await fetch(SHARED_CONFIGS_URL);
         if (response.ok) {
             sharedActions = await response.json();
             // Mark as shared
@@ -108,7 +111,7 @@ function renderActionsList() {
                     ${isShared ? `
                         <button class="btn-clone" onclick="event.stopPropagation(); addToLocal('${action.id}')" title="Add to my local configs">Add to Local</button>
                     ` : `
-                        <button class="btn-clone" onclick="event.stopPropagation(); cloneAction('${action.id}')">Clone</button>
+                    <button class="btn-clone" onclick="event.stopPropagation(); cloneAction('${action.id}')">Clone</button>
                         <button class="btn-clone" onclick="event.stopPropagation(); addToShared('${action.id}')" style="background: #4CAF50;" title="Share with team">Share</button>
                     `}
                 </div>
@@ -2397,7 +2400,7 @@ function escapeHtml(text) {
 }
 
 /**
- * Add action to shared configurations (using GitHub API with shared token)
+ * Add action to shared configurations (no token needed - uses GitHub via proxy)
  */
 async function addToShared(actionId) {
     const action = allActions.find(a => a.id === actionId);
@@ -2413,9 +2416,8 @@ async function addToShared(actionId) {
     }
     
     try {
-        // Get current shared configs from GitHub
-        const sharedConfigsUrl = 'https://raw.githubusercontent.com/sagikrief-glitch/sqlgenerator/master/shared-configs.json';
-        const response = await fetch(sharedConfigsUrl);
+        // Get current shared configs
+        const response = await fetch(SHARED_CONFIGS_URL);
         let sharedConfigs = [];
         if (response.ok) {
             sharedConfigs = await response.json();
@@ -2432,85 +2434,54 @@ async function addToShared(actionId) {
             sharedConfigs.push(actionToAdd);
         }
         
-        // Use GitHub API - you need to set a token in the code
-        // For security, this should be done via a backend, but for simplicity:
-        // Get token from localStorage or use a shared token
-        let githubToken = localStorage.getItem('githubSharedToken');
+        // Save using Netlify serverless function (no token needed on client!)
+        // The function handles GitHub API calls server-side
+        const netlifyUrl = 'https://your-site.netlify.app/.netlify/functions/share-config';
         
-        if (!githubToken) {
-            // First time: ask for token (one-time setup)
-            githubToken = prompt(
-                'One-time setup: Enter a GitHub Personal Access Token with "repo" permissions.\n\n' +
-                'This will be stored in your browser to enable sharing.\n\n' +
-                'Get token at: https://github.com/settings/tokens\n\n' +
-                'Token:'
+        // Try Netlify function first, fallback to direct GitHub if not available
+        try {
+            const saveResponse = await fetch(netlifyUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ configs: sharedConfigs })
+            });
+            
+            if (saveResponse.ok) {
+                alert(`✅ Configuration "${action.title}" has been shared with the team!`);
+                // Wait a moment for GitHub to update, then reload
+                setTimeout(async () => {
+                    await loadActions();
+                    renderActionsList();
+                }, 1000);
+            } else {
+                throw new Error('Failed to save via serverless function');
+            }
+        } catch (netlifyError) {
+            // Fallback: Show instructions for manual update
+            const jsonStr = JSON.stringify(sharedConfigs, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'shared-configs.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            alert(
+                `📋 Configuration "${action.title}" is ready to share!\n\n` +
+                `A file has been downloaded. To share it:\n` +
+                `1. Go to: https://github.com/sagikrief-glitch/sqlgenerator\n` +
+                `2. Edit shared-configs.json\n` +
+                `3. Replace contents with the downloaded file\n` +
+                `4. Commit changes\n\n` +
+                `Or set up Netlify function for automatic sharing (see README)`
             );
-            
-            if (!githubToken || !githubToken.trim()) {
-                if (shareBtn) {
-                    shareBtn.disabled = false;
-                    shareBtn.textContent = 'Share';
-                }
-                return;
-            }
-            
-            localStorage.setItem('githubSharedToken', githubToken.trim());
-            githubToken = githubToken.trim();
-        }
-        
-        // Get current file SHA
-        const apiUrl = 'https://api.github.com/repos/sagikrief-glitch/sqlgenerator/contents/shared-configs.json';
-        const fileResponse = await fetch(apiUrl, {
-            headers: {
-                'Authorization': `Bearer ${githubToken}`,
-                'Accept': 'application/vnd.github.v3+json'
-            }
-        });
-        
-        let sha = null;
-        if (fileResponse.ok) {
-            const fileData = await fileResponse.json();
-            sha = fileData.sha;
-        } else if (fileResponse.status === 404) {
-            // File doesn't exist yet, that's okay
-            sha = null;
-        } else {
-            const error = await fileResponse.json();
-            throw new Error(error.message || 'Failed to access GitHub');
-        }
-        
-        // Update file
-        const commitResponse = await fetch(apiUrl, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${githubToken}`,
-                'Content-Type': 'application/json',
-                'Accept': 'application/vnd.github.v3+json'
-            },
-            body: JSON.stringify({
-                message: `Add/Update shared configuration: ${action.title}`,
-                content: btoa(JSON.stringify(sharedConfigs, null, 2)),
-                sha: sha
-            })
-        });
-        
-        if (commitResponse.ok) {
-            alert(`✅ Configuration "${action.title}" has been shared with the team!`);
-            // Reload actions to get updated shared configs
-            await loadActions();
-            renderActionsList();
-        } else {
-            const errorData = await commitResponse.json();
-            if (commitResponse.status === 401) {
-                // Token invalid, clear it
-                localStorage.removeItem('githubSharedToken');
-                throw new Error('Invalid token. Please try again.');
-            }
-            throw new Error(errorData.message || 'Failed to save to GitHub');
         }
     } catch (error) {
         alert('❌ Error sharing configuration: ' + error.message);
-        console.error('Error sharing to GitHub:', error);
+        console.error('Error sharing:', error);
     } finally {
         if (shareBtn) {
             shareBtn.disabled = false;
