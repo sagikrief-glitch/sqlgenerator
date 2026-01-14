@@ -1,0 +1,268 @@
+<!--
+README: SQL Configuration Generator
+
+HOW TO RUN:
+1. Open this file (index.html) in any modern web browser
+2. No server or backend required - works completely offline
+3. All data is stored locally in your browser's localStorage
+
+FEATURES:
+- Built-in configuration actions (Cancel Order, Enable Tips, Set Max Items)
+- Create custom actions via "Add Action" button
+- Edit/delete custom actions (built-in actions are read-only but can be cloned)
+- Generate SQL templates for updating JSON fields in SQL tables
+- Supports StoreNos input as comma-separated, newline-separated, or ranges (e.g., 100-105)
+- Copy generated SQL to clipboard with one click
+
+USAGE:
+1. Click an action button on the left to select it
+2. Fill in the form on the right (StationId, StoreNos, etc.)
+3. Click "Generate SQL" to create the SQL template
+4. Click "Copy" to copy the SQL to your clipboard
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Configuration Generator</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SQL Configuration Generator</h1>
+            <p class="subtitle">Generate SQL templates for updating JSON fields</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Left Panel: Actions List -->
+            <aside class="actions-panel">
+                <div class="actions-header">
+                    <h2>Actions</h2>
+                </div>
+                <div class="header-buttons">
+                    <button id="freeSqlBtn" class="btn btn-primary">Free SQL</button>
+                    <button id="importSqlBtn" class="btn btn-primary">Import from SQL</button>
+                    <button id="addActionBtn" class="btn btn-primary">+ Add Action</button>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Search actions...">
+                </div>
+                <div id="actionsList" class="actions-list">
+                    <!-- Actions will be rendered here -->
+                </div>
+            </aside>
+
+            <!-- Right Panel: Form and Output -->
+            <main class="content-panel">
+                <div id="formContainer" class="form-container">
+                    <p class="placeholder-text">Select an action to get started</p>
+                </div>
+
+                <div id="outputContainer" class="output-container" style="display: none;">
+                    <div class="output-header">
+                        <h3>Generated SQL</h3>
+                        <div class="output-controls">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="formatSqlToggle">
+                                Format SQL
+                            </label>
+                            <button id="clearBtn" class="btn btn-secondary">Clear</button>
+                            <button id="copyBtn" class="btn btn-primary">Copy</button>
+                        </div>
+                    </div>
+                    <div id="sqlOutput" class="sql-output"></div>
+                    <div id="copyConfirmation" class="copy-confirmation" style="display: none;">Copied!</div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modal for Add/Edit Free SQL Query -->
+    <div id="freeSqlModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="freeSqlModalTitle">Save Free SQL Query</h2>
+                <button class="modal-close" id="closeFreeSqlModal">&times;</button>
+            </div>
+            <form id="freeSqlForm" class="modal-form">
+                <div class="form-group">
+                    <label for="freeSqlTitleInput">Query Title *</label>
+                    <input type="text" id="freeSqlTitleInput" required>
+                </div>
+                <div class="form-group">
+                    <label for="freeSqlDescription">Description</label>
+                    <textarea id="freeSqlDescription" rows="2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="freeSqlScript">SQL Script *</label>
+                    <textarea id="freeSqlScript" rows="8" style="font-family: 'Courier New', monospace;" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="freeSqlStoreColumn">Store Column Name</label>
+                    <input type="text" id="freeSqlStoreColumn" value="StoreNo">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="freeSqlAppendFilter" checked>
+                        Default: Append StoreNo filter
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="freeSqlFilterMode">Default Filter Style</label>
+                    <select id="freeSqlFilterMode">
+                        <option value="auto">Auto detect</option>
+                        <option value="where">Append as new WHERE clause</option>
+                        <option value="and">Append as AND condition</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="freeSqlApplyAll">
+                        Default: Apply to all statements
+                    </label>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelFreeSqlModalBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Query</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for Import from SQL -->
+    <div id="importSqlModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>Import from SQL</h2>
+                <button class="modal-close" id="closeImportSqlModal">&times;</button>
+            </div>
+            <form id="importSqlForm" class="modal-form">
+                <div class="form-group">
+                    <label for="importSqlInput">Paste SQL Script *</label>
+                    <textarea id="importSqlInput" placeholder="Paste your SQL UPDATE statement here..." rows="8" style="font-family: 'Courier New', monospace;" required></textarea>
+                    <button type="button" class="btn btn-primary" id="parseImportSqlBtn" style="margin-top: 10px; width: 100%;">Parse SQL</button>
+                    <div id="importSqlError" class="error-message" style="display: none; margin-top: 8px;"></div>
+                    <div id="importSqlSuccess" style="color: #4CAF50; font-size: 12px; margin-top: 8px; display: none;">✓ SQL parsed successfully! Review and save the action below.</div>
+                </div>
+                
+                <div id="importParsedFields" style="display: none;">
+                    <div class="form-group">
+                        <label for="importTitle">Action Title *</label>
+                        <input type="text" id="importTitle" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="importDescription">Description</label>
+                        <textarea id="importDescription" rows="2"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="importStationId">StationId *</label>
+                        <input type="text" id="importStationId" required readonly style="background: #f5f5f5;">
+                    </div>
+                    <div class="form-group">
+                        <label for="importTableName">Table Name</label>
+                        <input type="text" id="importTableName" readonly style="background: #f5f5f5;">
+                    </div>
+                    <div class="form-group">
+                        <label for="importStationColumn">Where clause</label>
+                        <input type="text" id="importStationColumn" readonly style="background: #f5f5f5;">
+                    </div>
+                    <div class="form-group">
+                        <label for="importStoreColumn">AND clause</label>
+                        <input type="text" id="importStoreColumn" readonly style="background: #f5f5f5;">
+                    </div>
+                    <div class="form-group">
+                        <label for="importConfigColumn">Configuration JSON Column Name</label>
+                        <input type="text" id="importConfigColumn" readonly style="background: #f5f5f5;">
+                    </div>
+                    <div id="importJsonPathsContainer"></div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelImportSqlBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="saveImportActionBtn" style="display: none;">Save Action</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for Add/Edit Action -->
+    <div id="actionModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Add Action</h2>
+                <button class="modal-close" id="closeModal">&times;</button>
+            </div>
+            <form id="actionForm" class="modal-form">
+                <div class="form-group">
+                    <label for="modalTitleInput">Button Title *</label>
+                    <input type="text" id="modalTitleInput" required>
+                </div>
+                <div class="form-group">
+                    <label for="modalDescription">Description</label>
+                    <textarea id="modalDescription" rows="2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="modalStationId">StationId Default *</label>
+                    <input type="text" id="modalStationId" required>
+                </div>
+                <div id="modalSingleValueContainer">
+                    <div class="form-group" style="display: flex; align-items: flex-end; gap: 10px;">
+                        <div style="flex: 1;">
+                            <label for="modalJsonPath">JSON Path *</label>
+                            <input type="text" id="modalJsonPath" placeholder="$.cancelOrder" required>
+                        </div>
+                        <div style="padding-top: 24px;">
+                            <button type="button" class="btn btn-secondary" id="modalAddValueBtn" style="white-space: nowrap;">+ Add value</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="modalValueType">Value Type *</label>
+                        <select id="modalValueType" required>
+                            <option value="boolean">Boolean</option>
+                            <option value="string">String</option>
+                            <option value="number">Number</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="modalValueGroup">
+                        <label for="modalValue">Value *</label>
+                        <div id="modalValueContainer"></div>
+                    </div>
+                </div>
+                <div id="modalMultiValueContainer" style="display: none;">
+                    <div class="form-group">
+                        <label>JSON Paths and Values</label>
+                        <div id="modalMultiRowsContainer"></div>
+                        <button type="button" class="btn btn-secondary" id="modalAddRowBtn" style="margin-top: 10px;">+ Add value</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="modalTableName">Table Name</label>
+                    <input type="text" id="modalTableName" value="StoreStations">
+                </div>
+                <div class="form-group">
+                    <label for="modalStationColumn">Where clause</label>
+                    <input type="text" id="modalStationColumn" value="StationId">
+                </div>
+                <div class="form-group">
+                    <label for="modalStoreColumn">AND clause</label>
+                    <input type="text" id="modalStoreColumn" value="StoreNo">
+                </div>
+                <div class="form-group">
+                    <label for="modalConfigColumn">Configuration JSON Column Name</label>
+                    <input type="text" id="modalConfigColumn" value="Configuration">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelModalBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="actions.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
