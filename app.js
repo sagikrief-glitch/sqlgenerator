@@ -3,15 +3,14 @@
  */
 
 // Firebase configuration (using Realtime Database - free tier)
-// Replace these values with your Firebase project config
 const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com/",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyB-QfQaE7yNaG_IVczFgs9C5k6e598JI1Q",
+    authDomain: "sql-generator-shared.firebaseapp.com",
+    databaseURL: "https://sql-generator-shared-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "sql-generator-shared",
+    storageBucket: "sql-generator-shared.firebasestorage.app",
+    messagingSenderId: "265551350997",
+    appId: "1:265551350997:web:1bc136836885c60017a65c"
 };
 
 // Initialize Firebase (only if not already initialized)
