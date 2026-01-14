@@ -2397,29 +2397,23 @@ function escapeHtml(text) {
 }
 
 /**
- * Add action to shared configurations (requires GitHub token)
+ * Add action to shared configurations (using GitHub API with shared token)
  */
 async function addToShared(actionId) {
     const action = allActions.find(a => a.id === actionId);
-    if (!action || action.isBuiltIn || action.isShared) return;
+    if (!action || action.isBuiltIn || action.isShared) {
+        return;
+    }
     
-    // Check if GitHub token is set
-    let githubToken = localStorage.getItem('githubToken');
-    if (!githubToken) {
-        githubToken = prompt('Enter your GitHub Personal Access Token to share configurations:\n\n' +
-            'To create a token:\n' +
-            '1. Go to https://github.com/settings/tokens\n' +
-            '2. Click "Generate new token (classic)"\n' +
-            '3. Give it "repo" permissions\n' +
-            '4. Copy and paste the token here\n\n' +
-            'This token will be stored in your browser for future use.');
-        
-        if (!githubToken) return;
-        localStorage.setItem('githubToken', githubToken);
+    // Show loading
+    const shareBtn = event?.target;
+    if (shareBtn) {
+        shareBtn.disabled = true;
+        shareBtn.textContent = 'Sharing...';
     }
     
     try {
-        // Get current shared configs
+        // Get current shared configs from GitHub
         const sharedConfigsUrl = 'https://raw.githubusercontent.com/sagikrief-glitch/sqlgenerator/master/shared-configs.json';
         const response = await fetch(sharedConfigsUrl);
         let sharedConfigs = [];
@@ -2438,21 +2432,60 @@ async function addToShared(actionId) {
             sharedConfigs.push(actionToAdd);
         }
         
-        // Get current file SHA for update
+        // Use GitHub API - you need to set a token in the code
+        // For security, this should be done via a backend, but for simplicity:
+        // Get token from localStorage or use a shared token
+        let githubToken = localStorage.getItem('githubSharedToken');
+        
+        if (!githubToken) {
+            // First time: ask for token (one-time setup)
+            githubToken = prompt(
+                'One-time setup: Enter a GitHub Personal Access Token with "repo" permissions.\n\n' +
+                'This will be stored in your browser to enable sharing.\n\n' +
+                'Get token at: https://github.com/settings/tokens\n\n' +
+                'Token:'
+            );
+            
+            if (!githubToken || !githubToken.trim()) {
+                if (shareBtn) {
+                    shareBtn.disabled = false;
+                    shareBtn.textContent = 'Share';
+                }
+                return;
+            }
+            
+            localStorage.setItem('githubSharedToken', githubToken.trim());
+            githubToken = githubToken.trim();
+        }
+        
+        // Get current file SHA
         const apiUrl = 'https://api.github.com/repos/sagikrief-glitch/sqlgenerator/contents/shared-configs.json';
-        const fileResponse = await fetch(apiUrl);
+        const fileResponse = await fetch(apiUrl, {
+            headers: {
+                'Authorization': `Bearer ${githubToken}`,
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        });
+        
         let sha = null;
         if (fileResponse.ok) {
             const fileData = await fileResponse.json();
             sha = fileData.sha;
+        } else if (fileResponse.status === 404) {
+            // File doesn't exist yet, that's okay
+            sha = null;
+        } else {
+            const error = await fileResponse.json();
+            throw new Error(error.message || 'Failed to access GitHub');
         }
         
-        // Commit to GitHub
+        // Update file
         const commitResponse = await fetch(apiUrl, {
             method: 'PUT',
             headers: {
-                'Authorization': `token ${githubToken}`,
-                'Content-Type': 'application/json'
+                'Authorization': `Bearer ${githubToken}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/vnd.github.v3+json'
             },
             body: JSON.stringify({
                 message: `Add/Update shared configuration: ${action.title}`,
@@ -2462,17 +2495,27 @@ async function addToShared(actionId) {
         });
         
         if (commitResponse.ok) {
-            alert(`Configuration "${action.title}" has been shared with the team!`);
+            alert(`✅ Configuration "${action.title}" has been shared with the team!`);
             // Reload actions to get updated shared configs
             await loadActions();
             renderActionsList();
         } else {
-            const error = await commitResponse.json();
-            throw new Error(error.message || 'Failed to save to GitHub');
+            const errorData = await commitResponse.json();
+            if (commitResponse.status === 401) {
+                // Token invalid, clear it
+                localStorage.removeItem('githubSharedToken');
+                throw new Error('Invalid token. Please try again.');
+            }
+            throw new Error(errorData.message || 'Failed to save to GitHub');
         }
     } catch (error) {
-        alert('Error sharing configuration: ' + error.message + '\n\nMake sure your GitHub token has "repo" permissions.');
+        alert('❌ Error sharing configuration: ' + error.message);
         console.error('Error sharing to GitHub:', error);
+    } finally {
+        if (shareBtn) {
+            shareBtn.disabled = false;
+            shareBtn.textContent = 'Share';
+        }
     }
 }
 
