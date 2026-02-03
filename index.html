@@ -5,20 +5,6 @@ HOW TO RUN:
 1. Open this file (index.html) in any modern web browser
 2. No server or backend required - works completely offline
 3. All data is stored locally in your browser's localStorage
-
-FEATURES:
-- Built-in configuration actions (Cancel Order, Enable Tips, Set Max Items)
-- Create custom actions via "Add Action" button
-- Edit/delete custom actions (built-in actions are read-only but can be cloned)
-- Generate SQL templates for updating JSON fields in SQL tables
-- Supports StoreNos input as comma-separated, newline-separated, or ranges (e.g., 100-105)
-- Copy generated SQL to clipboard with one click
-
-USAGE:
-1. Click an action button on the left to select it
-2. Fill in the form on the right (StationId, StoreNos, etc.)
-3. Click "Generate SQL" to create the SQL template
-4. Click "Copy" to copy the SQL to your clipboard
 -->
 
 <!DOCTYPE html>
@@ -31,363 +17,170 @@ USAGE:
 </head>
 <body>
     <div class="container">
+        <!-- Header with StoreNos -->
         <header>
             <div class="header-content">
                 <div class="header-title-section">
                     <h1>SQL Configuration Generator</h1>
-                    <p class="subtitle">Generate SQL templates for updating JSON fields</p>
                 </div>
-                <div class="header-buttons">
-                    <button id="freeSqlBtn" class="btn btn-primary">Free SQL</button>
-                    <button id="createScriptGroupBtn" class="btn btn-primary">Create Script Group</button>
-                    <button id="importSqlBtn" class="btn btn-primary">Import from SQL</button>
-                    <button id="addActionBtn" class="btn btn-primary">Create JSON_SET</button>
+                <div class="store-nos-input">
+                    <label for="globalStoreNos">StoreNos (optional)</label>
+                    <input type="text" id="globalStoreNos" placeholder="123, 456 or 100-105">
+                    <span id="storeNosCount" class="store-count"></span>
                 </div>
             </div>
         </header>
 
-        <div class="main-content">
-            <!-- Left Panel: Actions List -->
-            <aside class="actions-panel">
-                <div class="actions-header">
-                    <h2>Actions</h2>
-                </div>
-                <div class="search-box">
-                    <input type="text" id="searchInput" placeholder="Search actions...">
-                </div>
-                <div id="actionsList" class="actions-list">
-                    <!-- Actions will be rendered here -->
-                </div>
-            </aside>
+        <!-- Tab Navigation -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="jsonset" onclick="switchTab('jsonset')">JSON_SET Generator</button>
+            <button class="tab-btn" data-tab="saved" onclick="switchTab('saved')">Saved Configurations</button>
+            <button class="tab-btn" data-tab="freesql" onclick="switchTab('freesql')">Free SQL</button>
+        </nav>
 
-            <!-- Right Panel: Form and Output -->
-            <main class="content-panel">
-                <div id="formContainer" class="form-container">
-                    <p class="placeholder-text">Select an action to get started</p>
+        <!-- Main Content -->
+        <main class="main-content">
+            
+            <!-- Tab 1: JSON_SET Generator -->
+            <section id="tab-jsonset" class="tab-content active">
+                <div class="card">
+                    <form id="quickGeneratorForm">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="stationId">StationId</label>
+                                <input type="text" id="stationId" value="Dispatch" placeholder="Dispatch">
+                            </div>
+                        </div>
+                        
+                        <div id="pathValueRows">
+                            <div class="path-value-row" data-index="0">
+                                <div class="form-group path-group">
+                                    <label>JSON Path</label>
+                                    <input type="text" class="json-path" placeholder="$.configKey">
+                                </div>
+                                <div class="form-group value-group">
+                                    <label>Value</label>
+                                    <input type="text" class="json-value" placeholder="true">
+                                </div>
+                                <div class="form-group type-group">
+                                    <label>Type</label>
+                                    <select class="value-type">
+                                        <option value="boolean">Boolean</option>
+                                        <option value="string">String</option>
+                                        <option value="number">Number</option>
+                                        <option value="null">Null</option>
+                                    </select>
+                                </div>
+                                <button type="button" class="btn-icon btn-remove-row" title="Remove" style="visibility: hidden;">×</button>
+                            </div>
+                        </div>
+                        
+                        <button type="button" class="btn btn-link" id="addPathValueBtn">+ Add another path/value</button>
+                        
+                        <!-- Advanced Options -->
+                        <details class="advanced-section">
+                            <summary>Advanced Options</summary>
+                            <div class="advanced-grid">
+                                <div class="form-group">
+                                    <label for="tableName">Table Name</label>
+                                    <input type="text" id="tableName" value="StoreStations">
+                                </div>
+                                <div class="form-group">
+                                    <label for="configColumn">Config Column</label>
+                                    <input type="text" id="configColumn" value="Configuration">
+                                </div>
+                                <div class="form-group">
+                                    <label for="stationColumn">Station Column</label>
+                                    <input type="text" id="stationColumn" value="StationId">
+                                </div>
+                                <div class="form-group">
+                                    <label for="storeColumn">Store Column</label>
+                                    <input type="text" id="storeColumn" value="StoreNo">
+                                </div>
+                            </div>
+                        </details>
+                        
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-primary btn-large" onclick="generateFromQuickForm()">Generate SQL</button>
+                            <button type="button" class="btn btn-secondary" onclick="openSaveModal('json_set')">Save as Config</button>
+                        </div>
+                    </form>
                 </div>
+            </section>
 
-                <div id="outputContainer" class="output-container" style="display: none;">
-                    <div class="output-header">
+            <!-- Tab 2: Saved Configurations -->
+            <section id="tab-saved" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <input type="text" id="searchConfigs" placeholder="Search configurations..." class="search-input">
+                    </div>
+                    <div id="configsGrid" class="configs-grid">
+                        <p class="empty-state">No saved configurations yet.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab 3: Free SQL -->
+            <section id="tab-freesql" class="tab-content">
+                <div class="card">
+                    <form id="freeSqlForm">
+                        <div class="form-group">
+                            <label for="freeSqlInput">Paste any SQL script</label>
+                            <textarea id="freeSqlInput" rows="8" placeholder="Paste your SQL here..." class="code-input"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="appendStoreFilter">
+                                Append StoreNo filter
+                            </label>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-primary btn-large" onclick="generateFromFreeSql()">Generate SQL</button>
+                            <button type="button" class="btn btn-secondary" onclick="openSaveModal('free_sql')">Save as Config</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Output Section (always visible when has content) -->
+            <section id="outputSection" class="output-section" style="display: none;">
+                <div class="card output-card">
+                    <div class="card-header">
                         <h3>Generated SQL</h3>
                         <div class="output-controls">
-                            <label class="toggle-label">
-                                <input type="checkbox" id="formatSqlToggle">
-                                Format SQL
-                            </label>
-                            <button id="clearBtn" class="btn btn-secondary">Clear</button>
-                            <button id="copyBtn" class="btn btn-primary">Copy</button>
+                            <button id="copyBtn" class="btn btn-primary btn-small">Copy</button>
+                            <button id="clearBtn" class="btn btn-secondary btn-small">Clear</button>
                         </div>
                     </div>
-                    <div id="sqlOutput" class="sql-output"></div>
+                    <pre id="sqlOutput" class="sql-output"></pre>
                     <div id="copyConfirmation" class="copy-confirmation" style="display: none;">Copied!</div>
                 </div>
-            </main>
-        </div>
+            </section>
+
+        </main>
     </div>
 
-    <!-- Modal for Add/Edit Free SQL Query -->
-    <div id="freeSqlModal" class="modal" style="display: none;">
+    <!-- Modal for Save Config -->
+    <div id="saveConfigModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 id="freeSqlModalTitle">Save Free SQL Query</h2>
-                <button class="modal-close" id="closeFreeSqlModal">&times;</button>
+                <h2>Save Configuration</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
-            <form id="freeSqlForm" class="modal-form">
+            <div style="padding: 20px;">
                 <div class="form-group">
-                    <label for="freeSqlTitleInput">Query Title *</label>
-                    <input type="text" id="freeSqlTitleInput" required>
+                    <label for="configTitle">Title *</label>
+                    <input type="text" id="configTitle" placeholder="My Config">
                 </div>
                 <div class="form-group">
-                    <label for="freeSqlDescription">Description</label>
-                    <textarea id="freeSqlDescription" rows="2"></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="freeSqlScript">SQL Script *</label>
-                    <textarea id="freeSqlScript" rows="8" style="font-family: 'Courier New', monospace;" required></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="freeSqlStoreColumn">Store Column Name</label>
-                    <input type="text" id="freeSqlStoreColumn" value="StoreNo">
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="freeSqlAppendFilter" checked>
-                        Default: Append StoreNo filter
-                    </label>
-                </div>
-                <div class="form-group">
-                    <label for="freeSqlFilterMode">Default Filter Style</label>
-                    <select id="freeSqlFilterMode">
-                        <option value="auto">Auto detect</option>
-                        <option value="where">Append as new WHERE clause</option>
-                        <option value="and">Append as AND condition</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="freeSqlApplyAll">
-                        Default: Apply to all statements
-                    </label>
+                    <label for="configDescription">Description (optional)</label>
+                    <textarea id="configDescription" rows="2" placeholder="Brief description..."></textarea>
                 </div>
                 <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" id="cancelFreeSqlModalBtn">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Query</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveConfig()">Save</button>
                 </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal for Import from SQL -->
-    <div id="importSqlModal" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 800px;">
-            <div class="modal-header">
-                <h2>Import from SQL</h2>
-                <button class="modal-close" id="closeImportSqlModal">&times;</button>
             </div>
-            <form id="importSqlForm" class="modal-form">
-                <div class="form-group">
-                    <label for="importSqlInput">Paste SQL Script *</label>
-                    <textarea id="importSqlInput" placeholder="Paste your SQL UPDATE statement here..." rows="8" style="font-family: 'Courier New', monospace;" required></textarea>
-                    <button type="button" class="btn btn-primary" id="parseImportSqlBtn" style="margin-top: 10px; width: 100%;">Parse SQL</button>
-                    <div id="importSqlError" class="error-message" style="display: none; margin-top: 8px;"></div>
-                    <div id="importSqlSuccess" style="color: #4CAF50; font-size: 12px; margin-top: 8px; display: none;">✓ SQL parsed successfully! Review and save the action below.</div>
-                </div>
-                
-                <div id="importParsedFields" style="display: none;">
-                    <div class="form-group">
-                        <label for="importTitle">Action Title *</label>
-                        <input type="text" id="importTitle" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="importDescription">Description</label>
-                        <textarea id="importDescription" rows="2"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="importStationId">StationId *</label>
-                        <input type="text" id="importStationId" required readonly style="background: #f5f5f5;">
-                    </div>
-                    <div class="form-group">
-                        <label for="importTableName">Table Name</label>
-                        <input type="text" id="importTableName" readonly style="background: #f5f5f5;">
-                    </div>
-                    <div class="form-group">
-                        <label for="importStationColumn">Where clause</label>
-                        <input type="text" id="importStationColumn" readonly style="background: #f5f5f5;">
-                    </div>
-                    <div class="form-group">
-                        <label for="importStoreColumn">AND clause</label>
-                        <input type="text" id="importStoreColumn" readonly style="background: #f5f5f5;">
-                    </div>
-                    <div class="form-group">
-                        <label for="importConfigColumn">Configuration JSON Column Name</label>
-                        <input type="text" id="importConfigColumn" readonly style="background: #f5f5f5;">
-                    </div>
-                    <div id="importJsonPathsContainer"></div>
-                </div>
-                
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" id="cancelImportSqlBtn">Cancel</button>
-                    <button type="submit" class="btn btn-primary" id="saveImportActionBtn" style="display: none;">Save Action</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal for Add/Edit Action -->
-    <div id="actionModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="modalTitle">Create JSON_SET</h2>
-                <button class="modal-close" id="closeModal">&times;</button>
-            </div>
-            <form id="actionForm" class="modal-form">
-                <div class="form-group">
-                    <label for="modalTitleInput">Button Title *</label>
-                    <input type="text" id="modalTitleInput" required>
-                </div>
-                <div class="form-group">
-                    <label for="modalDescription">Description</label>
-                    <textarea id="modalDescription" rows="2"></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="modalStationId">StationId Default *</label>
-                    <input type="text" id="modalStationId" required>
-                </div>
-                <div id="modalSingleValueContainer">
-                    <div class="form-group" style="display: flex; align-items: flex-end; gap: 10px;">
-                        <div style="flex: 1;">
-                            <label for="modalJsonPath">JSON Path *</label>
-                            <input type="text" id="modalJsonPath" placeholder="$.cancelOrder" required>
-                        </div>
-                        <div style="padding-top: 24px;">
-                            <button type="button" class="btn btn-secondary" id="modalAddValueBtn" style="white-space: nowrap;">+ Add value</button>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="modalValueType">Value Type *</label>
-                        <select id="modalValueType" required>
-                            <option value="boolean">Boolean</option>
-                            <option value="string">String</option>
-                            <option value="number">Number</option>
-                        </select>
-                    </div>
-                    <div class="form-group" id="modalValueGroup">
-                        <label for="modalValue">Value *</label>
-                        <div id="modalValueContainer"></div>
-                    </div>
-                </div>
-                <div id="modalMultiValueContainer" style="display: none;">
-                    <div class="form-group">
-                        <label>JSON Paths and Values</label>
-                        <div id="modalMultiRowsContainer"></div>
-                        <button type="button" class="btn btn-secondary" id="modalAddRowBtn" style="margin-top: 10px;">+ Add value</button>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="modalTableName">Table Name</label>
-                    <input type="text" id="modalTableName" value="StoreStations">
-                </div>
-                <div class="form-group">
-                    <label for="modalStationColumn">Where clause</label>
-                    <input type="text" id="modalStationColumn" value="StationId">
-                </div>
-                <div class="form-group">
-                    <label for="modalStoreColumn">AND clause</label>
-                    <input type="text" id="modalStoreColumn" value="StoreNo">
-                </div>
-                <div class="form-group">
-                    <label for="modalConfigColumn">Configuration JSON Column Name</label>
-                    <input type="text" id="modalConfigColumn" value="Configuration">
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" id="cancelModalBtn">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal for Create/Edit Script Group -->
-    <div id="scriptGroupModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="scriptGroupModalTitle">Create Script Group</h2>
-                <button class="modal-close" id="closeScriptGroupModal">&times;</button>
-            </div>
-            <form id="scriptGroupForm" class="modal-form">
-                <div class="form-group">
-                    <label for="scriptGroupTitleInput">Group Title *</label>
-                    <input type="text" id="scriptGroupTitleInput" required>
-                </div>
-                <div class="form-group">
-                    <label for="scriptGroupDescription">Description</label>
-                    <textarea id="scriptGroupDescription" rows="2"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Scripts</label>
-                    <div id="scriptGroupScriptsList" class="script-group-scripts-list"></div>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" id="cancelScriptGroupModalBtn">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal for Edit Script in Group -->
-    <div id="scriptEditorModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="scriptEditorModalTitle">Edit Script</h2>
-                <button class="modal-close" id="closeScriptEditorModal">&times;</button>
-            </div>
-            <form id="scriptEditorForm" class="modal-form">
-                <div id="scriptEditorRawSqlContainer" style="display: none;">
-                    <div class="form-group">
-                        <label for="scriptEditorTitleInput">Script Title *</label>
-                        <input type="text" id="scriptEditorTitleInput" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="scriptEditorDescription">Description</label>
-                        <textarea id="scriptEditorDescription" rows="2" placeholder="Optional description for this script"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="scriptEditorSqlBlock">SQL Block *</label>
-                        <textarea id="scriptEditorSqlBlock" rows="10" style="font-family: 'Courier New', monospace;" required></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="scriptEditorEnsureSemicolon" checked>
-                            Ensure trailing semicolon
-                        </label>
-                    </div>
-                </div>
-                <div id="scriptEditorJsonSetContainer" style="display: none;">
-                    <div class="form-group">
-                        <label for="scriptEditorJsonSetTitleInput">Script Title *</label>
-                        <input type="text" id="scriptEditorJsonSetTitleInput" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="scriptEditorJsonSetDescription">Description</label>
-                        <textarea id="scriptEditorJsonSetDescription" rows="2" placeholder="Optional description for this script"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="scriptEditorJsonSetStationId">StationId Default *</label>
-                        <input type="text" id="scriptEditorJsonSetStationId" required>
-                    </div>
-                    <div id="scriptEditorJsonSetSingleContainer">
-                        <div class="form-group" style="display: flex; align-items: flex-end; gap: 10px;">
-                            <div style="flex: 1;">
-                                <label for="scriptEditorJsonSetJsonPath">JSON Path *</label>
-                                <input type="text" id="scriptEditorJsonSetJsonPath" placeholder="$.cancelOrder" required>
-                            </div>
-                            <div style="padding-top: 24px;">
-                                <button type="button" class="btn btn-secondary" id="scriptEditorJsonSetAddValueBtn" style="white-space: nowrap;">+ Add value</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="scriptEditorJsonSetValueType">Value Type *</label>
-                            <select id="scriptEditorJsonSetValueType" required>
-                                <option value="boolean">Boolean</option>
-                                <option value="string">String</option>
-                                <option value="number">Number</option>
-                            </select>
-                        </div>
-                        <div class="form-group" id="scriptEditorJsonSetValueGroup">
-                            <label for="scriptEditorJsonSetValue">Value *</label>
-                            <div id="scriptEditorJsonSetValueContainer"></div>
-                        </div>
-                    </div>
-                    <div id="scriptEditorJsonSetMultiContainer" style="display: none;">
-                        <div class="form-group">
-                            <label>JSON Paths and Values</label>
-                            <div id="scriptEditorJsonSetMultiRowsContainer"></div>
-                            <button type="button" class="btn btn-secondary" id="scriptEditorJsonSetAddRowBtn" style="margin-top: 10px;">+ Add value</button>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="scriptEditorJsonSetTableName">Table Name</label>
-                        <input type="text" id="scriptEditorJsonSetTableName" value="StoreStations">
-                    </div>
-                    <div class="form-group">
-                        <label for="scriptEditorJsonSetStationColumn">Where clause</label>
-                        <input type="text" id="scriptEditorJsonSetStationColumn" value="StationId">
-                    </div>
-                    <div class="form-group">
-                        <label for="scriptEditorJsonSetStoreColumn">AND clause</label>
-                        <input type="text" id="scriptEditorJsonSetStoreColumn" value="StoreNo">
-                    </div>
-                    <div class="form-group">
-                        <label for="scriptEditorJsonSetConfigColumn">Configuration JSON Column Name</label>
-                        <input type="text" id="scriptEditorJsonSetConfigColumn" value="Configuration">
-                    </div>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" id="cancelScriptEditorModalBtn">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save</button>
-                </div>
-            </form>
         </div>
     </div>
 
