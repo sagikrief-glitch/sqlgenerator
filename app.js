@@ -21,7 +21,17 @@ const DEFAULTS = {
 };
 
 // ============================================================================
-// Firebase Configuration
+// Config API (HTTP backend for saving/loading configurations)
+// ============================================================================
+// Backend: GET /configs (array), POST /configs (body: config), DELETE /configs?id=xxx
+// Production (deployed): use same origin so all users share one list via Vercel + GitHub.
+// Local dev: run node server.js and use http://localhost:3000/api
+const CONFIG_API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+    ? window.location.origin + '/api'
+    : 'http://localhost:3000/api';
+
+// ============================================================================
+// Firebase Configuration (optional, not used for configs when using API)
 // ============================================================================
 
 const firebaseConfig = {
@@ -186,17 +196,13 @@ function setupEventListeners() {
 
 async function loadConfigs() {
     allConfigs = [];
-    if (firebaseDb) {
-        try {
-            const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
-            const data = snapshot.val();
-            if (data) {
-                const list = Array.isArray(data) ? data : Object.values(data);
-                allConfigs = list.map(c => ({ ...c, isShared: true }));
-            }
-        } catch (error) {
-            console.log('Firebase load:', error.message);
-        }
+    try {
+        const res = await fetch(CONFIG_API_BASE + '/configs');
+        if (!res.ok) throw new Error(res.statusText || 'Load failed');
+        const data = await res.json();
+        allConfigs = Array.isArray(data) ? data : (data ? Object.values(data) : []);
+    } catch (error) {
+        console.log('Config API load:', error.message);
     }
 }
 
@@ -499,23 +505,18 @@ async function saveConfig() {
         Object.assign(config, data);
     }
     
-    if (!firebaseDb) {
-        alert('Cannot save: database not available. Check Firebase connection.');
-        return;
-    }
-    
     try {
-        const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
-        let shared = snapshot.val() || [];
-        if (!Array.isArray(shared)) shared = Object.values(shared);
-        shared = [config, ...shared];
-        await firebaseDb.ref('sharedConfigs').set(shared);
+        const res = await fetch(CONFIG_API_BASE + '/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        if (!res.ok) throw new Error(res.statusText || 'Save failed');
     } catch (e) {
         alert('Save failed: ' + (e.message || e));
         return;
     }
     
-    config.isShared = true;
     allConfigs.unshift(config);
     console.log('Config saved, total configs:', allConfigs.length);
     renderConfigCards();
@@ -530,17 +531,12 @@ async function deleteConfig(id) {
     
     allConfigs = allConfigs.filter(c => c.id !== id);
     
-    if (firebaseDb) {
-        try {
-            const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
-            let shared = snapshot.val() || [];
-            if (!Array.isArray(shared)) shared = Object.values(shared);
-            shared = shared.filter(c => c.id !== id);
-            await firebaseDb.ref('sharedConfigs').set(shared);
-        } catch (e) {
-            console.log('Delete error:', e);
-            alert('Deleted locally; sync may fail until connection is restored.');
-        }
+    try {
+        const res = await fetch(CONFIG_API_BASE + '/configs?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        if (!res.ok) console.log('Delete API error:', res.statusText);
+    } catch (e) {
+        console.log('Delete error:', e);
+        alert('Deleted from list; server may not have received the request.');
     }
     
     renderConfigCards();

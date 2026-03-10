@@ -2,6 +2,9 @@
   "functions": {
     "api/share-config.js": {
       "maxDuration": 10
+    },
+    "api/configs.js": {
+      "maxDuration": 10
     }
   }
 }
