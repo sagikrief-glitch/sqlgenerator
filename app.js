@@ -185,29 +185,19 @@ function setupEventListeners() {
 // ============================================================================
 
 async function loadConfigs() {
-    const localConfigs = JSON.parse(localStorage.getItem('sqlConfigs') || '[]');
-    
-    let sharedConfigs = [];
+    allConfigs = [];
     if (firebaseDb) {
         try {
             const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
             const data = snapshot.val();
             if (data) {
-                sharedConfigs = Array.isArray(data) ? data : Object.values(data);
-                sharedConfigs = sharedConfigs.map(c => ({ ...c, isShared: true }));
-                }
+                const list = Array.isArray(data) ? data : Object.values(data);
+                allConfigs = list.map(c => ({ ...c, isShared: true }));
+            }
         } catch (error) {
             console.log('Firebase load:', error.message);
-                }
+        }
     }
-    
-    const localIds = new Set(localConfigs.map(c => c.id));
-    allConfigs = [...localConfigs, ...sharedConfigs.filter(c => !localIds.has(c.id))];
-    }
-    
-function saveLocalConfigs() {
-    const localConfigs = allConfigs.filter(c => !c.isShared);
-    localStorage.setItem('sqlConfigs', JSON.stringify(localConfigs));
 }
 
 // ============================================================================
@@ -366,16 +356,14 @@ function renderConfigCards(search = '') {
     container.innerHTML = configs.map(c => {
         const typeClass = c.kind === 'free_sql' ? 'free-sql' : '';
         const typeLabel = c.kind === 'free_sql' ? 'SQL' : 'JSON';
-        const shared = c.isShared ? '<span class="shared-badge">SHARED</span>' : '';
         
         return `
             <div class="config-card" data-id="${c.id}">
                 <div class="config-card-menu">
                     <button class="btn-icon-small" onclick="event.stopPropagation(); deleteConfig('${c.id}')" title="Delete">🗑</button>
-                    ${!c.isShared ? `<button class="btn-icon-small" onclick="event.stopPropagation(); shareConfig('${c.id}')" title="Share">↗</button>` : ''}
                 </div>
                 <div class="config-card-title">
-                    ${escapeHtml(c.title)}${shared}
+                    ${escapeHtml(c.title)}
                     <span class="config-card-type ${typeClass}">${typeLabel}</span>
                 </div>
                 ${c.description ? `<div class="config-card-desc">${escapeHtml(c.description)}</div>` : ''}
@@ -481,7 +469,7 @@ function closeModal() {
     if (modal) modal.style.display = 'none';
 }
 
-function saveConfig() {
+async function saveConfig() {
     console.log('saveConfig called');
     const title = document.getElementById('configTitle')?.value.trim();
     console.log('Title:', title);
@@ -511,16 +499,28 @@ function saveConfig() {
         Object.assign(config, data);
     }
     
+    if (!firebaseDb) {
+        alert('Cannot save: database not available. Check Firebase connection.');
+        return;
+    }
+    
+    try {
+        const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
+        let shared = snapshot.val() || [];
+        if (!Array.isArray(shared)) shared = Object.values(shared);
+        shared = [config, ...shared];
+        await firebaseDb.ref('sharedConfigs').set(shared);
+    } catch (e) {
+        alert('Save failed: ' + (e.message || e));
+        return;
+    }
+    
+    config.isShared = true;
     allConfigs.unshift(config);
-    saveLocalConfigs();
     console.log('Config saved, total configs:', allConfigs.length);
     renderConfigCards();
     closeModal();
-    
-    // Switch to saved tab to show new config
     switchTab('saved');
-    
-    // Show success
     alert('Configuration saved: ' + title);
 }
 
@@ -530,44 +530,22 @@ async function deleteConfig(id) {
     
     allConfigs = allConfigs.filter(c => c.id !== id);
     
-    if (config.isShared && firebaseDb) {
+    if (firebaseDb) {
         try {
             const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
             let shared = snapshot.val() || [];
             if (!Array.isArray(shared)) shared = Object.values(shared);
             shared = shared.filter(c => c.id !== id);
             await firebaseDb.ref('sharedConfigs').set(shared);
-        } catch (e) { console.log('Delete error:', e); }
-    } else {
-        saveLocalConfigs();
-}
-
+        } catch (e) {
+            console.log('Delete error:', e);
+            alert('Deleted locally; sync may fail until connection is restored.');
+        }
+    }
+    
     renderConfigCards();
 }
 
-async function shareConfig(id) {
-    const config = allConfigs.find(c => c.id === id);
-    if (!config || config.isShared || !firebaseDb) return;
-    
-    if (!confirm(`Share "${config.title}"?`)) return;
-    
-    try {
-        const snapshot = await firebaseDb.ref('sharedConfigs').once('value');
-        let shared = snapshot.val() || [];
-        if (!Array.isArray(shared)) shared = Object.values(shared);
-        
-        const toShare = { ...config };
-        delete toShare.isShared;
-        shared.push(toShare);
-        
-        await firebaseDb.ref('sharedConfigs').set(shared);
-        config.isShared = true;
-        renderConfigCards();
-        alert('Shared!');
-    } catch (e) {
-        alert('Share failed');
-    }
-}
 
 // ============================================================================
 // Output
