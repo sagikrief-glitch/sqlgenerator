@@ -24,11 +24,16 @@ const DEFAULTS = {
 // Config API (HTTP backend for saving/loading configurations)
 // ============================================================================
 // Backend: GET /configs (array), POST /configs (body: config), DELETE /configs?id=xxx
-// Production (deployed): use same origin so all users share one list via Vercel + GitHub.
-// Local dev: run node server.js and use http://localhost:3000/api
-const CONFIG_API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-    ? window.location.origin + '/api'
-    : 'http://localhost:3000/api';
+// GitHub Pages has no server - use Vercel API URL. On Vercel same-origin /api works.
+// Set VERCEL_APP_URL to your Vercel deployment (e.g. https://sqlgenerator.vercel.app).
+const VERCEL_APP_URL = 'https://sqlgenerator.vercel.app';
+function getConfigApiBase() {
+    if (typeof window === 'undefined') return 'http://localhost:3000/api';
+    if (window.location.hostname === 'localhost') return 'http://localhost:3000/api';
+    if (window.location.hostname.includes('github.io')) return VERCEL_APP_URL + '/api';
+    return window.location.origin + '/api';
+}
+const CONFIG_API_BASE = getConfigApiBase();
 
 // ============================================================================
 // Firebase Configuration (optional, not used for configs when using API)
